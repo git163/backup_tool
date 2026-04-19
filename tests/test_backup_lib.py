@@ -829,3 +829,39 @@ class TestPreCheckThreadTargetViaOutput:
         with pytest.raises(ValueError) as exc_info:
             thread._get_target_fs()
         assert "Output must be a remote path" in str(exc_info.value)
+
+    def test_get_target_fs_rollback_with_proxy_output_success(self):
+        """回滚时 source 为本地 backup，proxy_output_path 为远程跳板，应正确解析跳板"""
+        from gui.thread import PreCheckThread
+        from lib.ssh_client import SSHConnection
+
+        mock_config = MagicMock()
+        mock_config.ssh_passwords = {
+            "out_user@out_host": "out_pass",
+            "tgt_user@tgt_host": "tgt_pass",
+        }
+
+        mock_ssh_pool = MagicMock()
+        mock_proxy_conn = MagicMock(spec=SSHConnection)
+        mock_target_conn = MagicMock(spec=SSHConnection)
+        mock_target_conn.sftp = MagicMock()
+        mock_target_conn.user = "tgt_user"
+        mock_proxy_conn.open_proxy_connection.return_value = mock_target_conn
+        mock_ssh_pool.get.side_effect = lambda user_host, password: {
+            "out_user@out_host": mock_proxy_conn,
+            "tgt_user@tgt_host": mock_target_conn,
+        }.get(user_host)
+
+        thread = PreCheckThread(
+            "/local/backup",
+            "tgt_user@tgt_host:/data/target",
+            mock_ssh_pool,
+            mock_config,
+            target_via_output=True,
+            proxy_output_path="out_user@out_host:/data/output",
+        )
+
+        fs, real_path = thread._get_target_fs()
+        assert real_path == "/data/target"
+        mock_ssh_pool.get.assert_any_call("out_user@out_host", "out_pass")
+        mock_proxy_conn.open_proxy_connection.assert_called_once_with("tgt_host", "tgt_user", "tgt_pass")

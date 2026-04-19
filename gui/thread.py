@@ -66,13 +66,14 @@ class PreCheckThread(QThread):
     log = Signal(str)
 
     def __init__(self, output_path: str, target_path: str, ssh_pool: SSHPool, config,
-                 target_via_output: bool = False):
+                 target_via_output: bool = False, proxy_output_path: Optional[str] = None):
         super().__init__()
         self.output_path = output_path
         self.target_path = target_path
         self.ssh_pool = ssh_pool
         self.config = config
         self.target_via_output = target_via_output
+        self.proxy_output_path = proxy_output_path
         self.logger = AppLogger.setup()
 
     def _get_fs(self, path: str):
@@ -89,7 +90,8 @@ class PreCheckThread(QThread):
         if not self.target_via_output:
             return self._get_fs(self.target_path)
 
-        out_is_remote, out_user, out_host, out_real = parse_path(self.output_path)
+        proxy_path = self.proxy_output_path or self.output_path
+        out_is_remote, out_user, out_host, out_real = parse_path(proxy_path)
         if not out_is_remote:
             raise ValueError("Output must be a remote path when using Via Output Host")
 

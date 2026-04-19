@@ -403,15 +403,17 @@ class MainWindow(QMainWindow):
         if not self._validate_via_output():
             return
         self._set_busy(True)
+        output = self.output_edit.text().strip()
         self._run_precheck(backup_path, target, lambda status, overlapping: self._on_precheck_done(
             status, overlapping, 'rollback', backup_path, target, backup
-        ))
+        ), proxy_output_path=output)
 
-    def _run_precheck(self, source_path: str, target_path: str, callback):
+    def _run_precheck(self, source_path: str, target_path: str, callback, proxy_output_path=None):
         self.logger.info(f"Start precheck: {source_path} -> {target_path}")
         self.current_thread = PreCheckThread(
             source_path, target_path, self.ssh_pool, self.config,
-            target_via_output=self.target_via_checkbox.isChecked()
+            target_via_output=self.target_via_checkbox.isChecked(),
+            proxy_output_path=proxy_output_path
         )
         self.current_thread.result.connect(lambda status, overlapping: callback(status, overlapping))
         self.current_thread.error.connect(self._on_thread_error)
