@@ -497,7 +497,7 @@ class MainWindow(QMainWindow):
         self.logger.info(f"Start worker: type={op_type}, source={source}, target={target}")
         paths = {'output': source, 'target': target, 'backup': backup}
         if op_type == 'rollback':
-            paths = {'backup': source, 'target': target, 'backup_dir': backup}
+            paths = {'backup': source, 'target': target, 'backup_dir': backup, 'output': self.output_edit.text().strip()}
 
         self.current_thread = WorkerThread(
             op_type, paths, self.ssh_pool, self.config,
