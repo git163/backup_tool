@@ -113,9 +113,9 @@ class PatchOperation(BaseOperation):
 
         # Remote -> Remote (SFTP 流式中转，不落地本地磁盘)
         if isinstance(self.source_fs, RemoteFS) and isinstance(self.target_fs, RemoteFS):
-            src_file = self.source_fs.sftp.open(src, 'rb')
+            src_file = self.source_fs.sftp.open(self.source_fs._resolve(src), 'rb')
             try:
-                self.target_fs.sftp.putfo(src_file, dst)
+                self.target_fs.sftp.putfo(src_file, self.target_fs._resolve(dst))
             finally:
                 src_file.close()
             return

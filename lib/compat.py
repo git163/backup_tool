@@ -128,9 +128,9 @@ def _copy_between_fs(
     if src_fs.isfile(src_path):
         if isinstance(src_fs, RemoteFS) and isinstance(dst_fs, RemoteFS):
             # Remote -> Remote (SFTP 流式中转)
-            src_file = src_fs.sftp.open(src_path, 'rb')
+            src_file = src_fs.sftp.open(src_fs._resolve(src_path), 'rb')
             try:
-                dst_fs.sftp.putfo(src_file, dst_path)
+                dst_fs.sftp.putfo(src_file, dst_fs._resolve(dst_path))
             finally:
                 src_file.close()
         elif isinstance(src_fs, RemoteFS):

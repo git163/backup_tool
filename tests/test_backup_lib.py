@@ -383,9 +383,11 @@ class TestSFTPStreamingCopy:
 
         mock_conn_src = MagicMock()
         mock_conn_src.sftp = mock_sftp_src
+        mock_conn_src.user = "testuser"
 
         mock_conn_dst = MagicMock()
         mock_conn_dst.sftp = mock_sftp_dst
+        mock_conn_dst.user = "testuser"
 
         src_fs = RemoteFS(mock_conn_src)
         dst_fs = RemoteFS(mock_conn_dst)
@@ -402,6 +404,40 @@ class TestSFTPStreamingCopy:
         mock_sftp_dst.putfo.assert_called_once_with(mock_file_obj, "/dst/file.txt")
         mock_file_obj.close.assert_called_once()
 
+    def test_copy_file_remote_to_remote_streaming_with_tilde(self):
+        """测试 PatchOperation Remote->Remote 带 ~ 路径时正确解析"""
+        mock_sftp_src = MagicMock()
+        mock_file_obj = MagicMock()
+        mock_sftp_src.open.return_value = mock_file_obj
+
+        mock_sftp_dst = MagicMock()
+
+        mock_conn_src = MagicMock()
+        mock_conn_src.sftp = mock_sftp_src
+        mock_conn_src.user = "testuser"
+
+        mock_conn_dst = MagicMock()
+        mock_conn_dst.sftp = mock_sftp_dst
+        mock_conn_dst.user = "testuser"
+
+        src_fs = RemoteFS(mock_conn_src)
+        dst_fs = RemoteFS(mock_conn_dst)
+        # 显式设置 home_dir 以覆盖 _get_home_dir 的默认值
+        src_fs._home_dir = "/home/testuser"
+        dst_fs._home_dir = "/home/testuser"
+
+        import logging
+        logger = logging.getLogger("test")
+        logger.setLevel(logging.DEBUG)
+
+        op = PatchOperation(src_fs, dst_fs, "~/src/file.txt", "~/dst/file.txt", logger)
+        op._copy_file("~/src/file.txt", "~/dst/file.txt")
+
+        # 验证 ~ 被解析为 /home/testuser
+        mock_sftp_src.open.assert_called_once_with("/home/testuser/src/file.txt", "rb")
+        mock_sftp_dst.putfo.assert_called_once_with(mock_file_obj, "/home/testuser/dst/file.txt")
+        mock_file_obj.close.assert_called_once()
+
     def test_copy_between_fs_remote_to_remote_streaming(self):
         """测试 _copy_between_fs Remote->Remote 使用流式传输"""
         mock_sftp_src = MagicMock()
@@ -413,9 +449,11 @@ class TestSFTPStreamingCopy:
 
         mock_conn_src = MagicMock()
         mock_conn_src.sftp = mock_sftp_src
+        mock_conn_src.user = "testuser"
 
         mock_conn_dst = MagicMock()
         mock_conn_dst.sftp = mock_sftp_dst
+        mock_conn_dst.user = "testuser"
 
         src_fs = RemoteFS(mock_conn_src)
         dst_fs = RemoteFS(mock_conn_dst)
@@ -428,6 +466,38 @@ class TestSFTPStreamingCopy:
 
         mock_sftp_src.open.assert_called_once_with("/src/file.txt", "rb")
         mock_sftp_dst.putfo.assert_called_once_with(mock_file_obj, "/dst/file.txt")
+        mock_file_obj.close.assert_called_once()
+
+    def test_copy_between_fs_remote_to_remote_streaming_with_tilde(self):
+        """测试 _copy_between_fs Remote->Remote 带 ~ 路径时正确解析"""
+        mock_sftp_src = MagicMock()
+        mock_file_obj = MagicMock()
+        mock_sftp_src.open.return_value = mock_file_obj
+        mock_sftp_src.stat.side_effect = lambda p: MagicMock(st_mode=0o100644)
+
+        mock_sftp_dst = MagicMock()
+
+        mock_conn_src = MagicMock()
+        mock_conn_src.sftp = mock_sftp_src
+        mock_conn_src.user = "testuser"
+
+        mock_conn_dst = MagicMock()
+        mock_conn_dst.sftp = mock_sftp_dst
+        mock_conn_dst.user = "testuser"
+
+        src_fs = RemoteFS(mock_conn_src)
+        dst_fs = RemoteFS(mock_conn_dst)
+        src_fs._home_dir = "/home/testuser"
+        dst_fs._home_dir = "/home/testuser"
+
+        import logging
+        logger = logging.getLogger("test")
+
+        from lib.compat import _copy_between_fs
+        _copy_between_fs(src_fs, "~/src/file.txt", dst_fs, "~/dst/file.txt", logger)
+
+        mock_sftp_src.open.assert_called_once_with("/home/testuser/src/file.txt", "rb")
+        mock_sftp_dst.putfo.assert_called_once_with(mock_file_obj, "/home/testuser/dst/file.txt")
         mock_file_obj.close.assert_called_once()
 
 
