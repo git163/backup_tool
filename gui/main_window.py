@@ -76,18 +76,25 @@ class MainWindow(QMainWindow):
 
         grid.addWidget(QLabel("Backup Dir:"), 0, 0)
         grid.addWidget(self.backup_edit, 0, 1)
-        grid.addWidget(self.backup_btn, 0, 2)
+        backup_btn_layout = QHBoxLayout()
+        backup_btn_layout.addStretch()
+        backup_btn_layout.addWidget(self.backup_btn)
+        grid.addLayout(backup_btn_layout, 0, 2)
 
         grid.addWidget(QLabel("Output Dir:"), 1, 0)
         grid.addWidget(self.output_edit, 1, 1)
-        grid.addWidget(self.output_btn, 1, 2)
+        output_btn_layout = QHBoxLayout()
+        output_btn_layout.addStretch()
+        output_btn_layout.addWidget(self.output_btn)
+        grid.addLayout(output_btn_layout, 1, 2)
 
         grid.addWidget(QLabel("Target Dir:"), 2, 0)
         grid.addWidget(self.target_edit, 2, 1)
         target_btn_layout = QHBoxLayout()
-        target_btn_layout.addWidget(self.target_btn)
+        target_btn_layout.addStretch()
         self.target_via_checkbox = QCheckBox("Via Output Host")
         target_btn_layout.addWidget(self.target_via_checkbox)
+        target_btn_layout.addWidget(self.target_btn)
         grid.addLayout(target_btn_layout, 2, 2)
 
         main_layout.addLayout(grid)
