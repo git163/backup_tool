@@ -32,13 +32,17 @@ class PreCheckThread(QThread):
             output_fs, output_real = self._get_fs(self.output_path)
             target_fs, target_real = self._get_fs(self.target_path)
 
+            self.logger.info("PreCheck: checking compatibility...")
             self.log.emit("Checking compatibility...")
             status = check_patch_compatibility(output_fs, target_fs, output_real, target_real)
+            self.logger.info(f"PreCheck: compatibility status = {status.value}")
             self.log.emit(f"Compatibility status: {status.value}")
 
             overlapping = find_overlapping_paths(output_fs, target_fs, output_real, target_real)
+            self.logger.info(f"PreCheck: overlapping count = {len(overlapping)}")
             self.result.emit(status.value, overlapping)
         except AuthenticationError as e:
+            self.logger.error(f"PreCheck auth error: {e}")
             self.error.emit(f"AUTH:{e}")
         except Exception as e:
             self.logger.exception("PreCheck failed")

@@ -152,33 +152,46 @@ class MainWindow(QMainWindow):
 
         if is_remote:
             user_host = f"{user}@{host}"
+            self.logger.info(f"Browse remote: {user_host}, current path: {real_path or '/'}")
             password = self.config.ssh_passwords.get(user_host)
             if not password:
                 password = self._ask_password(user_host)
                 if not password:
+                    self.logger.info("Browse cancelled: no password")
                     return
             dialog = RemoteDirDialog(self.ssh_pool, user_host, password, self)
             if dialog.exec_() == QDialog.Accepted:
-                edit.setText(f"{user_host}:{dialog.selected_path}")
+                selected = f"{user_host}:{dialog.selected_path}"
+                edit.setText(selected)
+                self.logger.info(f"Selected remote path: {selected}")
+            else:
+                self.logger.info("Browse cancelled by user")
         else:
             directory = QFileDialog.getExistingDirectory(self, "Select Directory", real_path or "")
             if directory:
                 edit.setText(directory)
+                self.logger.info(f"Selected local path: {directory}")
 
     def _ask_password(self, user_host: str) -> str:
+        self.logger.info(f"Requesting password for {user_host}")
         dialog = PasswordDialog(user_host, self)
         if dialog.exec_() == QDialog.Accepted:
             password, remember = dialog.get_password()
             if remember:
                 self.config.set_ssh_password(user_host, password)
-            # 验证密码
+                self.logger.info(f"Password remembered for {user_host}")
             try:
                 conn = self.ssh_pool.get(user_host, password)
                 if conn.verify_password(password):
+                    self.logger.info(f"Password verified for {user_host}")
                     return password
-            except Exception:
+            except Exception as e:
+                self.logger.warning(f"Password verification failed for {user_host}: {e}")
                 pass
             QMessageBox.warning(self, "Auth Failed", f"Failed to authenticate {user_host}")
+            self.logger.warning(f"Authentication failed for {user_host}")
+        else:
+            self.logger.info(f"Password dialog cancelled for {user_host}")
         return ""
 
     def _on_patch(self):
@@ -186,12 +199,16 @@ class MainWindow(QMainWindow):
         target = self.target_edit.text().strip()
         backup = self.backup_edit.text().strip()
 
+        self.logger.info(f"Patch clicked: output={output}, target={target}, backup={backup}")
+
         if not output or not target:
+            self.logger.warning("Patch aborted: Output or Target empty")
             QMessageBox.warning(self, "Input Error", "Output and Target directories are required")
             return
 
         is_remote, _, _, real_output = parse_path(output)
         if not is_remote and not os.path.exists(real_output):
+            self.logger.warning(f"Patch aborted: Output not found: {output}")
             QMessageBox.warning(self, "Input Error", f"Output directory not found: {output}")
             return
 
@@ -204,21 +221,27 @@ class MainWindow(QMainWindow):
         backup = self.backup_edit.text().strip()
         target = self.target_edit.text().strip()
 
+        self.logger.info(f"Rollback clicked: backup={backup}, target={target}")
+
         if not backup or not target:
+            self.logger.warning("Rollback aborted: Backup or Target empty")
             QMessageBox.warning(self, "Input Error", "Backup and Target directories are required")
             return
 
         backup_path = self.rollback_combo.currentData()
         if not backup_path:
+            self.logger.warning("Rollback aborted: no backup selected")
             QMessageBox.warning(self, "Input Error", "Please select a backup version")
             return
 
+        self.logger.info(f"Rollback backup selected: {backup_path}")
         self._set_busy(True)
         self._run_precheck(backup_path, target, lambda status, overlapping: self._on_precheck_done(
             status, overlapping, 'rollback', backup_path, target, backup
         ))
 
     def _run_precheck(self, source_path: str, target_path: str, callback):
+        self.logger.info(f"Start precheck: {source_path} -> {target_path}")
         self.current_thread = PreCheckThread(source_path, target_path, self.ssh_pool, self.config)
         self.current_thread.result.connect(lambda status, overlapping: callback(status, overlapping))
         self.current_thread.error.connect(self._on_thread_error)
@@ -227,19 +250,28 @@ class MainWindow(QMainWindow):
         self.current_thread.start()
 
     def _on_precheck_done(self, status: str, overlapping: list, op_type: str, source: str, target: str, backup: str):
+        self.logger.info(f"Precheck done: status={status}, overlapping_count={len(overlapping)}")
+        if overlapping:
+            self.logger.info(f"Overlapping items: {overlapping}")
+
         if status == CompatStatus.NONE.value:
+            self.logger.warning("Patch aborted: NONE compatibility")
             QMessageBox.critical(self, "Incompatible", "Source and target have no overlap. Operation aborted.")
             self._set_busy(False)
             return
 
         if status == CompatStatus.PARTIAL.value:
+            self.logger.info("Partial match detected, showing confirmation dialog")
             diff_text = self._build_diff_text(overlapping)
             dialog = ConfirmDialog("Partial Match", diff_text, self)
             if dialog.exec_() != QDialog.Accepted:
+                self.logger.info("User rejected partial match confirmation")
                 self._set_busy(False)
                 return
+            self.logger.info("User confirmed partial match")
 
         if overlapping:
+            self.logger.info("Showing overwrite confirmation dialog")
             overlap_text = "The following items will be overwritten:\n\n"
             for name in overlapping[:20]:
                 overlap_text += f"- {name}\n"
@@ -248,10 +280,11 @@ class MainWindow(QMainWindow):
             overlap_text += "\nContinue?"
             dialog = ConfirmDialog("Confirm Overwrite", overlap_text, self)
             if dialog.exec_() != QDialog.Accepted:
+                self.logger.info("User rejected overwrite confirmation")
                 self._set_busy(False)
                 return
+            self.logger.info("User confirmed overwrite")
 
-        # 启动工作线程
         self._run_worker(op_type, source, target, backup)
 
     def _build_diff_text(self, overlapping: list) -> str:
@@ -265,6 +298,7 @@ class MainWindow(QMainWindow):
         return text
 
     def _run_worker(self, op_type: str, source: str, target: str, backup: str):
+        self.logger.info(f"Start worker: type={op_type}, source={source}, target={target}")
         paths = {'output': source, 'target': target, 'backup': backup}
         if op_type == 'rollback':
             paths = {'backup': source, 'target': target, 'backup_dir': backup}
@@ -277,6 +311,7 @@ class MainWindow(QMainWindow):
         self.current_thread.start()
 
     def _on_worker_finished(self, success: bool, message: str):
+        self.logger.info(f"Worker finished: success={success}, message={message}")
         self._set_busy(False)
         if success:
             QMessageBox.information(self, "Success", message)
@@ -284,33 +319,35 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Failed", message)
 
     def _on_thread_error(self, msg: str):
+        self.logger.error(f"Thread error: {msg}")
         self._set_busy(False)
         if msg.startswith("AUTH:"):
-            # 需要密码
             user_host = msg.split(":", 1)[1].strip()
+            self.logger.info(f"Auth required for {user_host}")
             password = self._ask_password(user_host)
             if password:
-                # 重试
                 self.logger.info(f"Retrying with new password for {user_host}")
-                # 触发原来的操作重新执行
-                # 这里简化处理，让用户手动重新点击
         else:
             QMessageBox.critical(self, "Error", msg)
 
     def _on_thread_finished(self):
-        pass
+        # 兜底：如果线程结束但 busy 仍为 True，强制恢复
+        if not self.patch_btn.isEnabled():
+            self.logger.warning("Thread finished but busy state not reset, forcing restore")
+            self._set_busy(False)
 
     def _on_cancel(self):
+        self.logger.info("Cancel clicked")
         if self.current_thread and hasattr(self.current_thread, 'cancel'):
             self.current_thread.cancel()
-            self._on_log("Cancelling operation...")
+            self.logger.info("Cancellation requested")
 
     def _on_progress(self, step: str, detail: str):
         self._on_log(f"[{step}] {detail}")
 
     def _on_log(self, msg: str):
+        self.logger.info(msg)
         self.log_edit.append(msg)
-        # 滚动到底部
         scrollbar = self.log_edit.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
@@ -327,11 +364,14 @@ class MainWindow(QMainWindow):
         if busy:
             QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
         else:
-            QApplication.restoreOverrideCursor()
+            while QApplication.overrideCursor() is not None:
+                QApplication.restoreOverrideCursor()
 
     def _refresh_backups(self):
         backup_dir = self.backup_edit.text().strip()
+        self.logger.info(f"Refresh backups: {backup_dir}")
         if not backup_dir:
+            self.logger.warning("Refresh aborted: backup dir empty")
             return
         self.rollback_combo.clear()
         self.rollback_combo.setEnabled(False)
@@ -344,6 +384,7 @@ class MainWindow(QMainWindow):
                 if not password:
                     password = self._ask_password(user_host)
                     if not password:
+                        self.logger.warning("Refresh aborted: no password")
                         return
                 from lib.fs import RemoteFS
                 conn = self.ssh_pool.get(user_host, password)
@@ -353,7 +394,6 @@ class MainWindow(QMainWindow):
                 fs = LocalFS()
                 entries = fs.listdir(real_path)
 
-            # 过滤带时间戳的备份目录
             import re
             backups = []
             for name in entries:
@@ -363,12 +403,15 @@ class MainWindow(QMainWindow):
 
             for name in backups:
                 full_path = fs.join(real_path, name)
-                display = f"{name}"
-                self.rollback_combo.addItem(display, full_path)
+                self.rollback_combo.addItem(name, full_path)
 
             if backups:
                 self.rollback_combo.setEnabled(True)
+                self.logger.info(f"Found {len(backups)} backups")
+            else:
+                self.logger.info("No backups found")
         except Exception as e:
+            self.logger.error(f"Failed to list backups: {e}")
             QMessageBox.warning(self, "Error", f"Failed to list backups: {e}")
 
     def _save_config(self):
@@ -376,15 +419,16 @@ class MainWindow(QMainWindow):
         self.config.set("output", self.output_edit.text().strip())
         self.config.set("target", self.target_edit.text().strip())
         self.config.save(self.config_path)
-        self._on_log(f"Config saved to {self.config_path}")
+        self.logger.info(f"Config saved to {self.config_path}")
 
     def _load_config(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load Config", "conf", "JSON (*.json)")
         if path:
             self.config.load(path)
             self._load_defaults()
-            self._on_log(f"Config loaded from {path}")
+            self.logger.info(f"Config loaded from {path}")
 
     def closeEvent(self, event):
+        self.logger.info("Application closing")
         self.ssh_pool.clear_all()
         event.accept()
