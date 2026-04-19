@@ -474,6 +474,8 @@ class MainWindow(QMainWindow):
             text += f"| ... | and {len(overlapping) - 20} more |\n"
         if any(item.get("is_dir") for item in overlapping):
             text += "\n**Warning:** Directories will be completely removed and replaced.\n"
+        if self.target_via_checkbox.isChecked():
+            text += "\n**Note:** Target is accessed via output host (jump host).\n"
         text += "\nDo you want to continue?"
         return text
 
@@ -490,6 +492,8 @@ class MainWindow(QMainWindow):
             text += f"| ... | and {len(overlapping) - 20} more |\n"
         if any(item.get("is_dir") for item in overlapping):
             text += "\n**Warning:** Directories will be completely removed and replaced.\n"
+        if self.target_via_checkbox.isChecked():
+            text += "\n**Note:** Target is accessed via output host (jump host).\n"
         text += "\nContinue?"
         return text
 
@@ -499,6 +503,8 @@ class MainWindow(QMainWindow):
         text += f"**To:** `{self._truncate_path(target)}`\n\n"
         text += "Source and target have no common items. "
         text += "This means the target will receive all new content.\n\n"
+        if self.target_via_checkbox.isChecked():
+            text += "**Note:** Target is accessed via output host (jump host).\n\n"
         text += "Do you want to continue?"
         return text
 

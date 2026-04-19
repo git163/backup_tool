@@ -94,7 +94,10 @@ class RemoteDirDialog(QDialog):
         self.proxy_conn = proxy_conn
         self.current_path = "/"
         self.selected_path = ""
-        self.setWindowTitle(f"Remote Browser - {user_host}")
+        title = f"Remote Browser - {user_host}"
+        if proxy_conn:
+            title += " (via proxy)"
+        self.setWindowTitle(title)
         self.setMinimumSize(500, 400)
         self._setup_ui()
         self._load_dir(initial_path if initial_path else "/")
@@ -104,6 +107,11 @@ class RemoteDirDialog(QDialog):
 
         self.path_label = QLabel("/")
         layout.addWidget(self.path_label)
+
+        if self.proxy_conn:
+            self.proxy_notice = QLabel("Via Proxy (Jump Host)")
+            self.proxy_notice.setStyleSheet("color: #c00; font-weight: bold;")
+            layout.addWidget(self.proxy_notice)
 
         self.list_widget = QListWidget()
         self.list_widget.itemDoubleClicked.connect(self._on_double_click)
