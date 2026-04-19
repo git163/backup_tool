@@ -113,27 +113,36 @@ class WorkerThread(QThread):
         target_fs, target_real = self._get_fs(target_path)
         backup_fs, backup_real = self._get_fs(backup_dir) if backup_dir else (LocalFS(), backup_dir)
 
+        self.logger.info(f"Patch: output={output_real}, target={target_real}, backup={backup_real}")
+
         # 备份重叠文件
         if backup_dir:
+            self.logger.info("Patch: backing up overlapping files...")
             self.log.emit("Backing up overlapping files...")
             backup_name = backup_overlapping_files(
                 output_fs, target_fs, output_real, target_real,
                 backup_fs, backup_real, self.logger,
             )
             if backup_name:
+                self.logger.info(f"Patch: backup saved as {backup_name}")
                 self.log.emit(f"Backup saved: {backup_name}")
+            else:
+                self.logger.info("Patch: no overlapping files to backup")
 
         if self._is_cancelled():
+            self.logger.info("Patch: cancelled by user")
             self.finished_sig.emit(False, "Cancelled by user")
             return
 
         # 执行补丁
+        self.logger.info("Patch: applying patch...")
         self.log.emit("Applying patch...")
         op = PatchOperation(
             output_fs, target_fs, output_real, target_real,
             self.logger, self._on_progress, self._is_cancelled,
         )
         result = op.run()
+        self.logger.info(f"Patch: result success={result.success}, message={result.message}")
         self.finished_sig.emit(result.success, result.message)
 
     def _do_rollback(self):
@@ -143,16 +152,21 @@ class WorkerThread(QThread):
         backup_fs, backup_real = self._get_fs(backup_path)
         target_fs, target_real = self._get_fs(target_path)
 
+        self.logger.info(f"Rollback: backup={backup_real}, target={target_real}")
+
         if self._is_cancelled():
+            self.logger.info("Rollback: cancelled by user")
             self.finished_sig.emit(False, "Cancelled by user")
             return
 
+        self.logger.info("Rollback: starting rollback...")
         self.log.emit("Rolling back...")
         op = RollbackOperation(
             backup_fs, target_fs, backup_real, target_real,
             self.logger, self._on_progress, self._is_cancelled,
         )
         result = op.run()
+        self.logger.info(f"Rollback: result success={result.success}, message={result.message}")
         self.finished_sig.emit(result.success, result.message)
 
     def _do_backup(self):
@@ -162,16 +176,21 @@ class WorkerThread(QThread):
         target_fs, target_real = self._get_fs(target_path)
         backup_fs, backup_real = self._get_fs(backup_dir)
 
+        self.logger.info(f"Backup: target={target_real}, backup_dir={backup_real}")
+
         if self._is_cancelled():
+            self.logger.info("Backup: cancelled by user")
             self.finished_sig.emit(False, "Cancelled by user")
             return
 
+        self.logger.info("Backup: creating backup...")
         self.log.emit("Creating backup...")
         op = BackupOperation(
             target_fs, backup_fs, target_real, backup_real,
             self.logger, self._on_progress, self._is_cancelled,
         )
         result = op.run()
+        self.logger.info(f"Backup: result success={result.success}, message={result.message}")
         self.finished_sig.emit(result.success, result.message)
 
     def _get_fs(self, path: str):
@@ -186,4 +205,5 @@ class WorkerThread(QThread):
 
     def _on_progress(self, step: str, detail: str):
         self.progress.emit(step, detail)
+        self.logger.info(f"[{step}] {detail}")
         self.log.emit(f"[{step}] {detail}")

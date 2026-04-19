@@ -23,7 +23,7 @@ from lib.config import Config
 from lib.fs import parse_path, LocalFS
 from lib.ssh_client import SSHPool, AuthenticationError
 from lib.compat import CompatStatus
-from lib.logger import AppLogger, QtLogHandler
+from lib.logger import AppLogger
 
 
 class MainWindow(QMainWindow):
@@ -35,9 +35,6 @@ class MainWindow(QMainWindow):
             self.config.load(config_path)
 
         self.logger = AppLogger.setup()
-        self.qt_handler = QtLogHandler()
-        self.qt_handler.log_signal.connect(self._on_log)
-        self.logger.addHandler(self.qt_handler)
 
         self.ssh_pool = SSHPool()
         self.current_thread = None
