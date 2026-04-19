@@ -681,6 +681,123 @@ class TestWorkerThreadTargetViaOutput:
             thread._get_target_fs()
         assert "AUTH:user@gateway" in str(exc_info.value)
 
+    @patch("lib.ssh_client.paramiko.SSHClient")
+    def test_backup_overlap_get_target_fs_with_via_output_success(self, mock_ssh_class):
+        """测试 backup_overlap 勾选 Via Output Host 时正确建立跳板连接"""
+        from gui.thread import WorkerThread
+
+        mock_client = MagicMock()
+        mock_transport = MagicMock()
+        mock_transport.is_active.return_value = True
+        mock_client.get_transport.return_value = mock_transport
+        mock_ssh_class.return_value = mock_client
+
+        mock_channel = MagicMock()
+        mock_transport.open_channel.return_value = mock_channel
+
+        mock_sftp = MagicMock()
+        mock_client.open_sftp.return_value = mock_sftp
+        mock_sftp_channel = MagicMock()
+        mock_sftp.get_channel.return_value = mock_sftp_channel
+
+        mock_config = MagicMock()
+        mock_config.ssh_passwords = {
+            "user@gateway": "gateway_pass",
+            "user@internal": "internal_pass"
+        }
+
+        ssh_pool = SSHPool()
+
+        thread = WorkerThread(
+            "backup_overlap",
+            {
+                "output": "user@gateway:/data/output",
+                "target": "user@internal:/data/target",
+                "backup": "user@gateway:/data/backup",
+            },
+            ssh_pool,
+            mock_config,
+            target_via_output=True
+        )
+
+        target_fs, target_real = thread._get_target_fs()
+        assert isinstance(target_fs, RemoteFS)
+        assert target_real == "/data/target"
+
+    def test_rollback_get_target_fs_missing_password_raises(self):
+        """测试 rollback 缺少密码时抛出 AuthenticationError"""
+        from gui.thread import WorkerThread
+
+        mock_config = MagicMock()
+        mock_config.ssh_passwords = {}
+
+        thread = WorkerThread(
+            "rollback",
+            {
+                "backup": "user@gateway:/data/backup",
+                "target": "user@internal:/data/target",
+                "backup_dir": "user@gateway:/data/backup",
+                "output": "user@gateway:/data/output",
+            },
+            None,
+            mock_config,
+            target_via_output=True
+        )
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            thread._get_target_fs()
+        assert "AUTH:user@gateway" in str(exc_info.value)
+
+    def test_backup_overlap_get_target_fs_missing_password_raises(self):
+        """测试 backup_overlap 缺少密码时抛出 AuthenticationError"""
+        from gui.thread import WorkerThread
+
+        mock_config = MagicMock()
+        mock_config.ssh_passwords = {}
+
+        thread = WorkerThread(
+            "backup_overlap",
+            {
+                "output": "user@gateway:/data/output",
+                "target": "user@internal:/data/target",
+                "backup": "user@gateway:/data/backup",
+            },
+            None,
+            mock_config,
+            target_via_output=True
+        )
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            thread._get_target_fs()
+        assert "AUTH:user@gateway" in str(exc_info.value)
+
+    def test_rollback_get_target_fs_missing_output_raises(self):
+        """回归测试：rollback paths 缺少 output 键时应抛 KeyError"""
+        from gui.thread import WorkerThread
+
+        mock_config = MagicMock()
+        mock_config.ssh_passwords = {
+            "user@gateway": "gateway_pass",
+            "user@internal": "internal_pass"
+        }
+
+        thread = WorkerThread(
+            "rollback",
+            {
+                "backup": "user@gateway:/data/backup",
+                "target": "user@internal:/data/target",
+                "backup_dir": "user@gateway:/data/backup",
+                # 故意缺少 "output" 键
+            },
+            None,
+            mock_config,
+            target_via_output=True
+        )
+
+        with pytest.raises(KeyError) as exc_info:
+            thread._get_target_fs()
+        assert "output" in str(exc_info.value)
+
 
 class TestPreCheckThreadTargetViaOutput:
     """测试 PreCheckThread 的 _get_target_fs 逻辑"""
