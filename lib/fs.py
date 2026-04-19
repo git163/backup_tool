@@ -123,12 +123,28 @@ class RemoteFS(FileSystem):
     def __init__(self, ssh_conn: SSHConnection):
         self.ssh_conn = ssh_conn
         self.sftp = ssh_conn.sftp
+        self._home_dir = self._get_home_dir()
+
+    def _get_home_dir(self) -> str:
+        try:
+            _, stdout, _ = self.ssh_conn.exec_command('echo ~')
+            home = stdout.decode().strip()
+            if home:
+                return home
+        except Exception:
+            pass
+        return f'/home/{self.ssh_conn.user}'
+
+    def _resolve(self, path: str) -> str:
+        if path.startswith('~/') or path == '~':
+            return self._home_dir + path[1:]
+        return path
 
     def listdir(self, path: str) -> list[str]:
         if self.sftp is None:
             return []
         try:
-            entries = self.sftp.listdir(path)
+            entries = self.sftp.listdir(self._resolve(path))
             return [name for name in entries if not name.startswith('.')]
         except Exception:
             return []
@@ -137,7 +153,7 @@ class RemoteFS(FileSystem):
         if self.sftp is None:
             return False
         try:
-            self.sftp.stat(path)
+            self.sftp.stat(self._resolve(path))
             return True
         except Exception:
             return False
@@ -146,7 +162,7 @@ class RemoteFS(FileSystem):
         if self.sftp is None:
             return False
         try:
-            st = self.sftp.stat(path)
+            st = self.sftp.stat(self._resolve(path))
             return (st.st_mode & 0o170000) == 0o040000
         except Exception:
             return False
@@ -155,7 +171,7 @@ class RemoteFS(FileSystem):
         if self.sftp is None:
             return False
         try:
-            st = self.sftp.stat(path)
+            st = self.sftp.stat(self._resolve(path))
             return (st.st_mode & 0o170000) == 0o100000
         except Exception:
             return False
@@ -164,7 +180,7 @@ class RemoteFS(FileSystem):
         if self.sftp is None:
             raise RuntimeError("SFTP not connected")
         try:
-            self.sftp.mkdir(path)
+            self.sftp.mkdir(self._resolve(path))
         except Exception:
             if not exist_ok:
                 raise
@@ -176,20 +192,20 @@ class RemoteFS(FileSystem):
     def remove(self, path: str) -> None:
         if self.sftp is None:
             raise RuntimeError("SFTP not connected")
-        self._rm_recursive(path)
+        self._rm_recursive(self._resolve(path))
 
     def _rm_recursive(self, path: str) -> None:
         try:
-            st = self.sftp.stat(path)
+            st = self.sftp.stat(self._resolve(path))
             is_dir = (st.st_mode & 0o170000) == 0o040000
         except Exception:
             return
         if is_dir:
-            for name in self.sftp.listdir(path):
+            for name in self.sftp.listdir(self._resolve(path)):
                 self._rm_recursive(f"{path}/{name}")
-            self.sftp.rmdir(path)
+            self.sftp.rmdir(self._resolve(path))
         else:
-            self.sftp.remove(path)
+            self.sftp.remove(self._resolve(path))
 
     def join(self, *parts: str) -> str:
         return '/'.join(parts)
@@ -205,6 +221,7 @@ class RemoteFS(FileSystem):
     def makedirs(self, path: str, exist_ok: bool = False) -> None:
         if self.sftp is None:
             raise RuntimeError("SFTP not connected")
+        path = self._resolve(path)
         if path == '/' or path == '':
             return
         if self.exists(path):
@@ -226,7 +243,7 @@ class RemoteFS(FileSystem):
             raise RuntimeError("SFTP not connected")
         local_path = os.path.expanduser(local_path)
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
-        self.sftp.get(remote_path, local_path)
+        self.sftp.get(self._resolve(remote_path), local_path)
 
     def upload_file(self, local_path: str, remote_path: str) -> None:
         """从本地上传文件到远程。"""
@@ -234,7 +251,7 @@ class RemoteFS(FileSystem):
             raise RuntimeError("SFTP not connected")
         local_path = os.path.expanduser(local_path)
         self.makedirs(self.dirname(remote_path), exist_ok=True)
-        self.sftp.put(local_path, remote_path)
+        self.sftp.put(local_path, self._resolve(remote_path))
 
     def download_dir(self, remote_path: str, local_path: str) -> None:
         """从远程下载目录到本地。"""
@@ -242,13 +259,13 @@ class RemoteFS(FileSystem):
             raise RuntimeError("SFTP not connected")
         local_path = os.path.expanduser(local_path)
         os.makedirs(local_path, exist_ok=True)
-        for name in self.sftp.listdir(remote_path):
+        for name in self.sftp.listdir(self._resolve(remote_path)):
             rpath = f"{remote_path}/{name}"
             lpath = os.path.join(local_path, name)
             if self.isdir(rpath):
                 self.download_dir(rpath, lpath)
             else:
-                self.sftp.get(rpath, lpath)
+                self.sftp.get(self._resolve(rpath), lpath)
 
     def upload_dir(self, local_path: str, remote_path: str) -> None:
         """从本地上传目录到远程。"""
@@ -262,7 +279,7 @@ class RemoteFS(FileSystem):
             if os.path.isdir(lpath):
                 self.upload_dir(lpath, rpath)
             else:
-                self.sftp.put(lpath, rpath)
+                self.sftp.put(lpath, self._resolve(rpath))
 
 
 class TempLocalFS(LocalFS):
