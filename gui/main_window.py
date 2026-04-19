@@ -62,6 +62,7 @@ class MainWindow(QMainWindow):
 
         # 目录输入区
         grid = QGridLayout()
+        grid.setColumnStretch(1, 1)  # 让输入框列可以拉伸，拉长编辑框
         self.backup_edit = QLineEdit()
         self.output_edit = QLineEdit()
         self.target_edit = QLineEdit()
@@ -91,10 +92,9 @@ class MainWindow(QMainWindow):
         grid.addWidget(QLabel("Target Dir:"), 2, 0)
         grid.addWidget(self.target_edit, 2, 1)
         target_btn_layout = QHBoxLayout()
-        target_btn_layout.addStretch()
         self.target_via_checkbox = QCheckBox("Via Output Host")
-        target_btn_layout.addWidget(self.target_via_checkbox)
-        target_btn_layout.addWidget(self.target_btn)
+        target_btn_layout.addWidget(self.target_via_checkbox, 1)
+        target_btn_layout.addWidget(self.target_btn, 1)
         grid.addLayout(target_btn_layout, 2, 2)
 
         main_layout.addLayout(grid)
