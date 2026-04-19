@@ -16,4 +16,4 @@ else
 fi
 
 export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH}"
-$PYTHON gui/main_window.py "$@"
+$PYTHON gui/app.py "$@"
