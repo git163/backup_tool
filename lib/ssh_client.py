@@ -32,15 +32,15 @@ class SFTPTimeoutError(Exception):
 class SSHConnection:
     """封装 paramiko.SSHClient + SFTPClient，支持复用。"""
 
-    def __init__(self, host: str, user: str, password: str):
+    def __init__(self, host: str, user: str, password: str, sock=None):
         self.host = host
         self.user = user
         self.client = paramiko.SSHClient()
         self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         self.sftp: Optional[paramiko.SFTPClient] = None
-        self._connect(password)
+        self._connect(password, sock)
 
-    def _connect(self, password: str) -> None:
+    def _connect(self, password: str, sock=None) -> None:
         try:
             self.client.connect(
                 hostname=self.host,
@@ -50,6 +50,7 @@ class SSHConnection:
                 banner_timeout=CONNECTION_TIMEOUT,
                 auth_timeout=AUTH_TIMEOUT,
                 look_for_keys=False,
+                sock=sock,
             )
             self.sftp = self.client.open_sftp()
             if self.sftp:
@@ -98,6 +99,25 @@ class SSHConnection:
         stderr = channel.makefile_stderr('r', -1)
         exit_status = channel.recv_exit_status()
         return exit_status, stdout.read(), stderr.read()
+
+    def open_proxy_connection(self, target_host: str, target_user: str, target_password: str) -> "SSHConnection":
+        """
+        通过当前 SSH 连接建立到 target 的跳板连接。
+        使用 SSH direct-tcpip 通道转发，gateway 上无需执行任何远程命令。
+        """
+        transport = self.client.get_transport()
+        if transport is None or not transport.is_active():
+            raise ConnectionTimeoutError("SSH connection lost")
+
+        channel = transport.open_channel(
+            "direct-tcpip",
+            (target_host, 22),
+            ("127.0.0.1", 0),
+        )
+        if channel is None:
+            raise ConnectionTimeoutError(f"Failed to open proxy channel to {target_host}:22")
+
+        return SSHConnection(target_host, target_user, target_password, sock=channel)
 
     def close(self) -> None:
         if self.sftp:

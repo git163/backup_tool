@@ -127,16 +127,12 @@ def _copy_between_fs(
 
     if src_fs.isfile(src_path):
         if isinstance(src_fs, RemoteFS) and isinstance(dst_fs, RemoteFS):
-            # Remote -> Remote 中转
-            temp_fs = TempLocalFS()
+            # Remote -> Remote (SFTP 流式中转)
+            src_file = src_fs.sftp.open(src_path, 'rb')
             try:
-                temp_path = os.path.join(temp_fs.temp_dir, os.path.basename(src_path))
-                src_fs.download_file(src_path, temp_path)
-                if cancelled_callback and cancelled_callback():
-                    raise RuntimeError("Operation cancelled")
-                dst_fs.upload_file(temp_path, dst_path)
+                dst_fs.sftp.putfo(src_file, dst_path)
             finally:
-                temp_fs.cleanup()
+                src_file.close()
         elif isinstance(src_fs, RemoteFS):
             # Remote -> Local
             src_fs.download_file(src_path, dst_path)

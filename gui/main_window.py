@@ -13,7 +13,7 @@ import sys
 
 from gui.qt_compat import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QLineEdit, QPushButton, QTextEdit, QComboBox,
+    QLabel, QLineEdit, QPushButton, QTextEdit, QComboBox, QCheckBox,
     QFileDialog, QMessageBox, QApplication, Qt, QCursor,
     QMenuBar, QMenu, QAction, QDialog
 )
@@ -84,7 +84,11 @@ class MainWindow(QMainWindow):
 
         grid.addWidget(QLabel("Target Dir:"), 2, 0)
         grid.addWidget(self.target_edit, 2, 1)
-        grid.addWidget(self.target_btn, 2, 2)
+        target_btn_layout = QHBoxLayout()
+        target_btn_layout.addWidget(self.target_btn)
+        self.target_via_checkbox = QCheckBox("Via Output Host")
+        target_btn_layout.addWidget(self.target_via_checkbox)
+        grid.addLayout(target_btn_layout, 2, 2)
 
         main_layout.addLayout(grid)
 
@@ -151,9 +155,17 @@ class MainWindow(QMainWindow):
         self.backup_edit.setText(self.config.get("backup", ""))
         self.output_edit.setText(self.config.get("output", ""))
         self.target_edit.setText(self.config.get("target", ""))
+        self.target_via_checkbox.setChecked(self.config.get("target_via_output", False))
 
     def _browse(self, edit: QLineEdit):
         path = edit.text().strip()
+
+        if edit == self.target_edit and self.target_via_checkbox.isChecked():
+            if not self._validate_via_output():
+                return
+            self._browse_target_via_output(path)
+            return
+
         is_remote, user, host, real_path = parse_path(path)
 
         if is_remote:
@@ -177,6 +189,50 @@ class MainWindow(QMainWindow):
             if directory:
                 edit.setText(directory)
                 self.logger.info(f"Selected local path: {directory}")
+
+    def _browse_target_via_output(self, target_path: str):
+        """通过 output 主机作为跳板浏览 target 目录。"""
+        output = self.output_edit.text().strip()
+        is_out_remote, out_user, out_host, out_real = parse_path(output)
+        if not is_out_remote:
+            QMessageBox.warning(self, "Error", "Output must be a remote path when using Via Output Host")
+            return
+
+        is_tgt_remote, tgt_user, tgt_host, tgt_real = parse_path(target_path)
+        if not is_tgt_remote:
+            QMessageBox.warning(self, "Error", "Target must be a remote path when using Via Output Host")
+            return
+
+        out_user_host = f"{out_user}@{out_host}"
+        tgt_user_host = f"{tgt_user}@{tgt_host}"
+
+        out_password = self.config.ssh_passwords.get(out_user_host)
+        if not out_password:
+            out_password = self._ask_password(out_user_host)
+            if not out_password:
+                return
+
+        tgt_password = self.config.ssh_passwords.get(tgt_user_host)
+        if not tgt_password:
+            tgt_password = self._ask_password(tgt_user_host)
+            if not tgt_password:
+                return
+
+        proxy_conn = self.ssh_pool.get(out_user_host, out_password)
+        try:
+            target_conn = proxy_conn.open_proxy_connection(tgt_host, tgt_user, tgt_password)
+        except Exception as e:
+            QMessageBox.warning(self, "Connection Failed", f"Failed to connect to target via output host: {e}")
+            return
+
+        dialog = RemoteDirDialog(
+            self.ssh_pool, tgt_user_host, tgt_password,
+            tgt_real or "/", self, proxy_conn=target_conn
+        )
+        if dialog.exec_() == QDialog.Accepted:
+            selected = f"{tgt_user_host}:{dialog.selected_path}"
+            self.target_edit.setText(selected)
+            self.logger.info(f"Selected remote path: {selected}")
 
     def _ask_password(self, user_host: str) -> str:
         self.logger.info(f"Requesting password for {user_host}")
@@ -216,6 +272,33 @@ class MainWindow(QMainWindow):
             return False
         return True
 
+    def _validate_via_output(self) -> bool:
+        if not self.target_via_checkbox.isChecked():
+            return True
+
+        output = self.output_edit.text().strip()
+        target = self.target_edit.text().strip()
+
+        if not output:
+            QMessageBox.warning(self, "Input Error", "Output directory is required when Via Output Host is checked")
+            return False
+
+        is_out_remote, _, _, _ = parse_path(output)
+        if not is_out_remote:
+            QMessageBox.warning(self, "Input Error", "Output must be a remote path (user@host:/path) when Via Output Host is checked")
+            return False
+
+        if not target:
+            QMessageBox.warning(self, "Input Error", "Target directory is required")
+            return False
+
+        is_tgt_remote, _, _, _ = parse_path(target)
+        if not is_tgt_remote:
+            QMessageBox.warning(self, "Input Error", "Target must be a remote path (user@host:/path) when Via Output Host is checked")
+            return False
+
+        return True
+
     def _confirm_partial(self, source: str, target: str, overlapping: list) -> bool:
         if not overlapping:
             return True
@@ -242,6 +325,8 @@ class MainWindow(QMainWindow):
 
     def _on_backup(self):
         if not self._validate_patch_input(require_backup=True):
+            return
+        if not self._validate_via_output():
             return
         self._set_busy(True)
         self._run_precheck(
@@ -276,6 +361,8 @@ class MainWindow(QMainWindow):
     def _on_patch(self):
         if not self._validate_patch_input():
             return
+        if not self._validate_via_output():
+            return
         self._set_busy(True)
         self._run_precheck(
             self.output_edit.text().strip(),
@@ -306,6 +393,8 @@ class MainWindow(QMainWindow):
             return
 
         self.logger.info(f"Rollback backup selected: {backup_path}")
+        if not self._validate_via_output():
+            return
         self._set_busy(True)
         self._run_precheck(backup_path, target, lambda status, overlapping: self._on_precheck_done(
             status, overlapping, 'rollback', backup_path, target, backup
@@ -313,7 +402,10 @@ class MainWindow(QMainWindow):
 
     def _run_precheck(self, source_path: str, target_path: str, callback):
         self.logger.info(f"Start precheck: {source_path} -> {target_path}")
-        self.current_thread = PreCheckThread(source_path, target_path, self.ssh_pool, self.config)
+        self.current_thread = PreCheckThread(
+            source_path, target_path, self.ssh_pool, self.config,
+            target_via_output=self.target_via_checkbox.isChecked()
+        )
         self.current_thread.result.connect(lambda status, overlapping: callback(status, overlapping))
         self.current_thread.error.connect(self._on_thread_error)
         self.current_thread.log.connect(self._on_log)
@@ -407,7 +499,10 @@ class MainWindow(QMainWindow):
         if op_type == 'rollback':
             paths = {'backup': source, 'target': target, 'backup_dir': backup}
 
-        self.current_thread = WorkerThread(op_type, paths, self.ssh_pool, self.config)
+        self.current_thread = WorkerThread(
+            op_type, paths, self.ssh_pool, self.config,
+            target_via_output=self.target_via_checkbox.isChecked()
+        )
         self.current_thread.progress.connect(self._on_progress)
         self.current_thread.log.connect(self._on_log)
         self.current_thread.finished_sig.connect(self._on_worker_finished)
@@ -506,6 +601,7 @@ class MainWindow(QMainWindow):
         self.config.set("backup", self.backup_edit.text().strip())
         self.config.set("output", self.output_edit.text().strip())
         self.config.set("target", self.target_edit.text().strip())
+        self.config.set("target_via_output", self.target_via_checkbox.isChecked())
         self.config.save(self.config_path)
         self.logger.info(f"Config saved to {self.config_path}")
 

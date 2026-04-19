@@ -65,18 +65,56 @@ class PreCheckThread(QThread):
     error = Signal(str)
     log = Signal(str)
 
-    def __init__(self, output_path: str, target_path: str, ssh_pool: SSHPool, config):
+    def __init__(self, output_path: str, target_path: str, ssh_pool: SSHPool, config,
+                 target_via_output: bool = False):
         super().__init__()
         self.output_path = output_path
         self.target_path = target_path
         self.ssh_pool = ssh_pool
         self.config = config
+        self.target_via_output = target_via_output
         self.logger = AppLogger.setup()
+
+    def _get_fs(self, path: str):
+        is_remote, user, host, real_path = parse_path(path)
+        if is_remote:
+            user_host = f"{user}@{host}"
+            password = self.config.ssh_passwords.get(user_host)
+            conn = self.ssh_pool.get(user_host, password)
+            return RemoteFS(conn), real_path
+        return LocalFS(), real_path
+
+    def _get_target_fs(self):
+        """获取 target 的 FileSystem，支持通过 output 跳板。"""
+        if not self.target_via_output:
+            return self._get_fs(self.target_path)
+
+        out_is_remote, out_user, out_host, out_real = parse_path(self.output_path)
+        if not out_is_remote:
+            raise ValueError("Output must be a remote path when using Via Output Host")
+
+        tgt_is_remote, tgt_user, tgt_host, tgt_real = parse_path(self.target_path)
+        if not tgt_is_remote:
+            raise ValueError("Target must be a remote path when using Via Output Host")
+
+        out_user_host = f"{out_user}@{out_host}"
+        out_password = self.config.ssh_passwords.get(out_user_host)
+        if not out_password:
+            raise AuthenticationError(f"AUTH:{out_user_host}")
+        proxy_conn = self.ssh_pool.get(out_user_host, out_password)
+
+        tgt_user_host = f"{tgt_user}@{tgt_host}"
+        tgt_password = self.config.ssh_passwords.get(tgt_user_host)
+        if not tgt_password:
+            raise AuthenticationError(f"AUTH:{tgt_user_host}")
+
+        target_conn = proxy_conn.open_proxy_connection(tgt_host, tgt_user, tgt_password)
+        return RemoteFS(target_conn), tgt_real
 
     def run(self):
         try:
             output_fs, output_real = self._get_fs(self.output_path)
-            target_fs, target_real = self._get_fs(self.target_path)
+            target_fs, target_real = self._get_target_fs()
 
             self.logger.info("PreCheck: checking compatibility...")
             self.log.emit("Checking compatibility...")
@@ -98,15 +136,6 @@ class PreCheckThread(QThread):
             self.logger.exception("PreCheck failed")
             self.error.emit(str(e))
 
-    def _get_fs(self, path: str):
-        is_remote, user, host, real_path = parse_path(path)
-        if is_remote:
-            user_host = f"{user}@{host}"
-            password = self.config.ssh_passwords.get(user_host)
-            conn = self.ssh_pool.get(user_host, password)
-            return RemoteFS(conn), real_path
-        return LocalFS(), real_path
-
 
 class WorkerThread(QThread):
     """工作线程：执行备份 + 操作。"""
@@ -121,12 +150,14 @@ class WorkerThread(QThread):
         paths: dict,
         ssh_pool: SSHPool,
         config,
+        target_via_output: bool = False,
     ):
         super().__init__()
         self.operation_type = operation_type
         self.paths = paths
         self.ssh_pool = ssh_pool
         self.config = config
+        self.target_via_output = target_via_output
         self.logger = AppLogger.setup()
         self._cancelled = False
 
@@ -163,7 +194,7 @@ class WorkerThread(QThread):
         backup_dir = self.paths.get('backup', '')
 
         output_fs, output_real = self._get_fs(output_path)
-        target_fs, target_real = self._get_fs(target_path)
+        target_fs, target_real = self._get_target_fs()
         backup_fs, backup_real = self._get_fs(backup_dir) if backup_dir else (LocalFS(), backup_dir)
 
         if require_backup and not backup_dir:
@@ -199,7 +230,7 @@ class WorkerThread(QThread):
             return
 
         output_fs, output_real = self._get_fs(self.paths['output'])
-        target_fs, target_real = self._get_fs(self.paths['target'])
+        target_fs, target_real = self._get_target_fs()
 
         self.logger.info("Patch: applying patch...")
         self.log.emit("Applying patch...")
@@ -234,7 +265,7 @@ class WorkerThread(QThread):
         target_path = self.paths['target']
 
         backup_fs, backup_real = self._get_fs(backup_path)
-        target_fs, target_real = self._get_fs(target_path)
+        target_fs, target_real = self._get_target_fs()
 
         self.logger.info(f"Rollback: backup={backup_real}, target={target_real}")
 
@@ -257,7 +288,7 @@ class WorkerThread(QThread):
         target_path = self.paths['target']
         backup_dir = self.paths['backup']
 
-        target_fs, target_real = self._get_fs(target_path)
+        target_fs, target_real = self._get_target_fs()
         backup_fs, backup_real = self._get_fs(backup_dir)
 
         self.logger.info(f"Backup: target={target_real}, backup_dir={backup_real}")
@@ -286,6 +317,33 @@ class WorkerThread(QThread):
             conn = self.ssh_pool.get(user_host, password)
             return RemoteFS(conn), real_path
         return LocalFS(), real_path
+
+    def _get_target_fs(self):
+        """获取 target 的 FileSystem，支持通过 output 跳板。"""
+        if not self.target_via_output:
+            return self._get_fs(self.paths['target'])
+
+        out_is_remote, out_user, out_host, out_real = parse_path(self.paths['output'])
+        if not out_is_remote:
+            raise ValueError("Output must be a remote path when using Via Output Host")
+
+        tgt_is_remote, tgt_user, tgt_host, tgt_real = parse_path(self.paths['target'])
+        if not tgt_is_remote:
+            raise ValueError("Target must be a remote path when using Via Output Host")
+
+        out_user_host = f"{out_user}@{out_host}"
+        out_password = self.config.ssh_passwords.get(out_user_host)
+        if not out_password:
+            raise AuthenticationError(f"AUTH:{out_user_host}")
+        proxy_conn = self.ssh_pool.get(out_user_host, out_password)
+
+        tgt_user_host = f"{tgt_user}@{tgt_host}"
+        tgt_password = self.config.ssh_passwords.get(tgt_user_host)
+        if not tgt_password:
+            raise AuthenticationError(f"AUTH:{tgt_user_host}")
+
+        target_conn = proxy_conn.open_proxy_connection(tgt_host, tgt_user, tgt_password)
+        return RemoteFS(target_conn), tgt_real
 
     def _on_progress(self, step: str, detail: str):
         self.progress.emit(step, detail)

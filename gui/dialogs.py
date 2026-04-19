@@ -58,17 +58,21 @@ class _RemoteDirLoader(QThread):
     loaded = Signal(list)
     error = Signal(str)
 
-    def __init__(self, ssh_pool: SSHPool, user_host: str, password: str, path: str):
+    def __init__(self, ssh_pool: SSHPool, user_host: str, password: str, path: str, proxy_conn=None):
         super().__init__()
         self.ssh_pool = ssh_pool
         self.user_host = user_host
         self.password = password
         self.path = path
+        self.proxy_conn = proxy_conn
 
     def run(self):
         try:
-            conn = self.ssh_pool.get(self.user_host, self.password)
-            fs = RemoteFS(conn)
+            if self.proxy_conn:
+                fs = RemoteFS(self.proxy_conn)
+            else:
+                conn = self.ssh_pool.get(self.user_host, self.password)
+                fs = RemoteFS(conn)
             entries = []
             for name in fs.listdir(self.path):
                 full_path = fs.join(self.path, name)
@@ -82,11 +86,12 @@ class _RemoteDirLoader(QThread):
 class RemoteDirDialog(QDialog):
     """SSH 远程目录浏览器。"""
 
-    def __init__(self, ssh_pool: SSHPool, user_host: str, password: str, initial_path: str = "/", parent=None):
+    def __init__(self, ssh_pool: SSHPool, user_host: str, password: str, initial_path: str = "/", parent=None, proxy_conn=None):
         super().__init__(parent)
         self.ssh_pool = ssh_pool
         self.user_host = user_host
         self.password = password
+        self.proxy_conn = proxy_conn
         self.current_path = "/"
         self.selected_path = ""
         self.setWindowTitle(f"Remote Browser - {user_host}")
@@ -133,7 +138,7 @@ class RemoteDirDialog(QDialog):
         self.setEnabled(False)
         QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
 
-        self.loader = _RemoteDirLoader(self.ssh_pool, self.user_host, self.password, path)
+        self.loader = _RemoteDirLoader(self.ssh_pool, self.user_host, self.password, path, proxy_conn=self.proxy_conn)
         self.loader.loaded.connect(self._on_loaded)
         self.loader.error.connect(self._on_load_error)
         self.loader.finished.connect(self._on_load_finished)

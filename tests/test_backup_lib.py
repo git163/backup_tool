@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 from lib.fs import LocalFS, RemoteFS, parse_path
 from lib.compat import check_patch_compatibility, find_overlapping_paths, backup_overlapping_files, CompatStatus
 from lib.operations import PatchOperation, RollbackOperation, BackupOperation
-from lib.ssh_client import SSHPool, AuthenticationError
+from lib.ssh_client import SSHPool, AuthenticationError, ConnectionTimeoutError
 
 
 class TestLocalFS:
@@ -313,3 +313,287 @@ class TestSSHPool:
         pool = SSHPool()
         with pytest.raises(Exception):
             pool.get("user@host", "wrong_password")
+
+
+class TestSSHProxyConnection:
+    """测试 SSH 跳板连接功能"""
+
+    @patch("lib.ssh_client.paramiko.SSHClient")
+    def test_open_proxy_connection_success(self, mock_ssh_class):
+        """测试成功建立跳板连接"""
+        mock_client = MagicMock()
+        mock_transport = MagicMock()
+        mock_transport.is_active.return_value = True
+        mock_client.get_transport.return_value = mock_transport
+        mock_ssh_class.return_value = mock_client
+
+        # 模拟 direct-tcpip 通道
+        mock_channel = MagicMock()
+        mock_transport.open_channel.return_value = mock_channel
+
+        conn = SSHConnection("gateway", "user", "password")
+        proxy_conn = conn.open_proxy_connection("internal", "target_user", "target_password")
+
+        assert proxy_conn is not None
+        mock_transport.open_channel.assert_called_once_with(
+            "direct-tcpip", ("internal", 22), ("127.0.0.1", 0)
+        )
+        # 验证第二个 SSHClient 被创建时传入了 sock=mock_channel
+        assert mock_ssh_class.call_count == 2
+
+    @patch("lib.ssh_client.paramiko.SSHClient")
+    def test_open_proxy_connection_transport_inactive(self, mock_ssh_class):
+        """测试 transport 断开时抛出异常"""
+        mock_client = MagicMock()
+        mock_transport = MagicMock()
+        mock_transport.is_active.return_value = False
+        mock_client.get_transport.return_value = mock_transport
+        mock_ssh_class.return_value = mock_client
+
+        conn = SSHConnection("gateway", "user", "password")
+        with pytest.raises(ConnectionTimeoutError):
+            conn.open_proxy_connection("internal", "target_user", "target_password")
+
+    @patch("lib.ssh_client.paramiko.SSHClient")
+    def test_open_proxy_connection_channel_none(self, mock_ssh_class):
+        """测试 direct-tcpip 通道打开失败"""
+        mock_client = MagicMock()
+        mock_transport = MagicMock()
+        mock_transport.is_active.return_value = True
+        mock_transport.open_channel.return_value = None
+        mock_client.get_transport.return_value = mock_transport
+        mock_ssh_class.return_value = mock_client
+
+        conn = SSHConnection("gateway", "user", "password")
+        with pytest.raises(ConnectionTimeoutError) as exc_info:
+            conn.open_proxy_connection("internal", "target_user", "target_password")
+        assert "Failed to open proxy channel" in str(exc_info.value)
+
+
+class TestSFTPStreamingCopy:
+    """测试 Remote->Remote SFTP 流式传输"""
+
+    def test_copy_file_remote_to_remote_streaming(self):
+        """测试 PatchOperation Remote->Remote 使用流式传输而非本地中转"""
+        mock_sftp_src = MagicMock()
+        mock_file_obj = MagicMock()
+        mock_sftp_src.open.return_value = mock_file_obj
+
+        mock_sftp_dst = MagicMock()
+
+        mock_conn_src = MagicMock()
+        mock_conn_src.sftp = mock_sftp_src
+
+        mock_conn_dst = MagicMock()
+        mock_conn_dst.sftp = mock_sftp_dst
+
+        src_fs = RemoteFS(mock_conn_src)
+        dst_fs = RemoteFS(mock_conn_dst)
+
+        import logging
+        logger = logging.getLogger("test")
+        logger.setLevel(logging.DEBUG)
+
+        op = PatchOperation(src_fs, dst_fs, "/src/file.txt", "/dst/file.txt", logger)
+        op._copy_file("/src/file.txt", "/dst/file.txt")
+
+        # 验证使用了 sftp.open + putfo，没有使用 download/upload
+        mock_sftp_src.open.assert_called_once_with("/src/file.txt", "rb")
+        mock_sftp_dst.putfo.assert_called_once_with(mock_file_obj, "/dst/file.txt")
+        mock_file_obj.close.assert_called_once()
+
+    def test_copy_between_fs_remote_to_remote_streaming(self):
+        """测试 _copy_between_fs Remote->Remote 使用流式传输"""
+        mock_sftp_src = MagicMock()
+        mock_file_obj = MagicMock()
+        mock_sftp_src.open.return_value = mock_file_obj
+        mock_sftp_src.stat.side_effect = lambda p: MagicMock(st_mode=0o100644)
+
+        mock_sftp_dst = MagicMock()
+
+        mock_conn_src = MagicMock()
+        mock_conn_src.sftp = mock_sftp_src
+
+        mock_conn_dst = MagicMock()
+        mock_conn_dst.sftp = mock_sftp_dst
+
+        src_fs = RemoteFS(mock_conn_src)
+        dst_fs = RemoteFS(mock_conn_dst)
+
+        import logging
+        logger = logging.getLogger("test")
+
+        from lib.compat import _copy_between_fs
+        _copy_between_fs(src_fs, "/src/file.txt", dst_fs, "/dst/file.txt", logger)
+
+        mock_sftp_src.open.assert_called_once_with("/src/file.txt", "rb")
+        mock_sftp_dst.putfo.assert_called_once_with(mock_file_obj, "/dst/file.txt")
+        mock_file_obj.close.assert_called_once()
+
+
+class TestTargetViaOutputValidation:
+    """测试 Via Output Host 边界校验逻辑"""
+
+    def test_parse_path_remote_with_port_like_host(self):
+        """测试带端口的主机名不会被错误解析"""
+        # 当前实现不支持端口，但这格式会被解析为 host="gateway:2222"
+        is_remote, user, host, real_path = parse_path("user@gateway:2222:/path")
+        assert is_remote
+        assert user == "user"
+        # host 会变成 "gateway:2222"，这会导致 paramiko 连接失败
+        # 这是一个已知的边界约束
+        assert host == "gateway:2222"
+        assert real_path == "/path"
+
+    def test_parse_path_edge_cases(self):
+        """测试路径解析边界情况"""
+        # 只有 @ 没有 :
+        is_remote, user, host, real_path = parse_path("user@host/path")
+        assert not is_remote  # 没有 : 分隔符，视为本地路径
+
+        # 空的远程路径
+        is_remote, user, host, real_path = parse_path("user@host:")
+        assert is_remote
+        assert real_path == ""
+
+
+class TestWorkerThreadTargetViaOutput:
+    """测试 WorkerThread 的 _get_target_fs 逻辑"""
+
+    def test_get_target_fs_without_via_output(self):
+        """测试未勾选 Via Output Host 时走常规路径"""
+        from gui.thread import WorkerThread
+
+        thread = WorkerThread("patch", {"output": "/local", "target": "/local/target"}, None, {}, target_via_output=False)
+        fs, real_path = thread._get_fs("/local/target")
+        assert isinstance(fs, LocalFS)
+        assert real_path == "/local/target"
+
+    @patch("lib.ssh_client.paramiko.SSHClient")
+    def test_get_target_fs_with_via_output_success(self, mock_ssh_class):
+        """测试勾选 Via Output Host 时正确建立跳板连接"""
+        from gui.thread import WorkerThread
+
+        mock_client = MagicMock()
+        mock_transport = MagicMock()
+        mock_transport.is_active.return_value = True
+        mock_client.get_transport.return_value = mock_transport
+        mock_ssh_class.return_value = mock_client
+
+        mock_channel = MagicMock()
+        mock_transport.open_channel.return_value = mock_channel
+
+        mock_sftp = MagicMock()
+        mock_client.open_sftp.return_value = mock_sftp
+        mock_sftp_channel = MagicMock()
+        mock_sftp.get_channel.return_value = mock_sftp_channel
+
+        # 创建 mock config，包含两个密码
+        mock_config = MagicMock()
+        mock_config.ssh_passwords = {
+            "user@gateway": "gateway_pass",
+            "user@internal": "internal_pass"
+        }
+
+        ssh_pool = SSHPool()
+
+        thread = WorkerThread(
+            "patch",
+            {"output": "user@gateway:/data/output", "target": "user@internal:/data/target"},
+            ssh_pool,
+            mock_config,
+            target_via_output=True
+        )
+
+        target_fs, target_real = thread._get_target_fs()
+        assert isinstance(target_fs, RemoteFS)
+        assert target_real == "/data/target"
+
+    def test_get_target_fs_output_local_raises(self):
+        """测试 output 为本地路径时抛出 ValueError"""
+        from gui.thread import WorkerThread
+
+        mock_config = MagicMock()
+        mock_config.ssh_passwords = {}
+
+        thread = WorkerThread(
+            "patch",
+            {"output": "/local/output", "target": "user@internal:/data/target"},
+            None,
+            mock_config,
+            target_via_output=True
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            thread._get_target_fs()
+        assert "Output must be a remote path" in str(exc_info.value)
+
+    def test_get_target_fs_target_local_raises(self):
+        """测试 target 为本地路径时抛出 ValueError"""
+        from gui.thread import WorkerThread
+
+        mock_config = MagicMock()
+        mock_config.ssh_passwords = {"user@gateway": "pass"}
+
+        thread = WorkerThread(
+            "patch",
+            {"output": "user@gateway:/data/output", "target": "/local/target"},
+            None,
+            mock_config,
+            target_via_output=True
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            thread._get_target_fs()
+        assert "Target must be a remote path" in str(exc_info.value)
+
+    def test_get_target_fs_missing_password_raises(self):
+        """测试缺少密码时抛出 AuthenticationError"""
+        from gui.thread import WorkerThread
+
+        mock_config = MagicMock()
+        mock_config.ssh_passwords = {}  # 没有密码
+
+        thread = WorkerThread(
+            "patch",
+            {"output": "user@gateway:/data/output", "target": "user@internal:/data/target"},
+            None,
+            mock_config,
+            target_via_output=True
+        )
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            thread._get_target_fs()
+        assert "AUTH:user@gateway" in str(exc_info.value)
+
+
+class TestPreCheckThreadTargetViaOutput:
+    """测试 PreCheckThread 的 _get_target_fs 逻辑"""
+
+    def test_get_target_fs_without_via_output(self):
+        """测试未勾选 Via Output Host 时走常规路径"""
+        from gui.thread import PreCheckThread
+
+        thread = PreCheckThread("/local/output", "/local/target", None, {}, target_via_output=False)
+        fs, real_path = thread._get_fs("/local/target")
+        assert isinstance(fs, LocalFS)
+        assert real_path == "/local/target"
+
+    def test_get_target_fs_output_local_raises(self):
+        """测试 output 为本地路径时抛出 ValueError"""
+        from gui.thread import PreCheckThread
+
+        mock_config = MagicMock()
+        mock_config.ssh_passwords = {}
+
+        thread = PreCheckThread(
+            "/local/output",
+            "user@internal:/data/target",
+            None,
+            mock_config,
+            target_via_output=True
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            thread._get_target_fs()
+        assert "Output must be a remote path" in str(exc_info.value)
