@@ -122,6 +122,7 @@ class WorkerThread(QThread):
             backup_name = backup_overlapping_files(
                 output_fs, target_fs, output_real, target_real,
                 backup_fs, backup_real, self.logger,
+                self._is_cancelled,
             )
             if backup_name:
                 self.logger.info(f"Patch: backup saved as {backup_name}")

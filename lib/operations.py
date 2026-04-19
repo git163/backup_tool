@@ -117,6 +117,8 @@ class PatchOperation(BaseOperation):
             try:
                 temp_path = os.path.join(temp_fs.temp_dir, os.path.basename(src))
                 self.source_fs.download_file(src, temp_path)
+                if self._is_cancelled():
+                    raise RuntimeError("Operation cancelled")
                 self.target_fs.upload_file(temp_path, dst)
             finally:
                 temp_fs.cleanup()

@@ -85,6 +85,7 @@ def backup_overlapping_files(
     backup_fs: FileSystem,
     backup_dir: str,
     logger,
+    cancelled_callback=None,
 ) -> Optional[str]:
     """
     仅备份会被覆盖的部分。
@@ -102,10 +103,12 @@ def backup_overlapping_files(
     backup_fs.makedirs(backup_subdir, exist_ok=True)
 
     for name in overlapping:
+        if cancelled_callback and cancelled_callback():
+            raise RuntimeError("Operation cancelled")
         src = target_fs.join(target_path, name)
         dst = backup_fs.join(backup_subdir, name)
         logger.info(f"Backup: {src} -> {dst}")
-        _copy_between_fs(target_fs, src, backup_fs, dst, logger)
+        _copy_between_fs(target_fs, src, backup_fs, dst, logger, cancelled_callback)
 
     return backup_name
 
@@ -116,8 +119,12 @@ def _copy_between_fs(
     dst_fs: FileSystem,
     dst_path: str,
     logger,
+    cancelled_callback=None,
 ) -> None:
     """在两个 FileSystem 之间复制文件或目录。"""
+    if cancelled_callback and cancelled_callback():
+        raise RuntimeError("Operation cancelled")
+
     if src_fs.isfile(src_path):
         if isinstance(src_fs, RemoteFS) and isinstance(dst_fs, RemoteFS):
             # Remote -> Remote 中转
@@ -125,6 +132,8 @@ def _copy_between_fs(
             try:
                 temp_path = os.path.join(temp_fs.temp_dir, os.path.basename(src_path))
                 src_fs.download_file(src_path, temp_path)
+                if cancelled_callback and cancelled_callback():
+                    raise RuntimeError("Operation cancelled")
                 dst_fs.upload_file(temp_path, dst_path)
             finally:
                 temp_fs.cleanup()
@@ -143,5 +152,5 @@ def _copy_between_fs(
             _copy_between_fs(
                 src_fs, src_fs.join(src_path, name),
                 dst_fs, dst_fs.join(dst_path, name),
-                logger
+                logger, cancelled_callback
             )
