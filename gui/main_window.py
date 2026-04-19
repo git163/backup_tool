@@ -92,6 +92,7 @@ class MainWindow(QMainWindow):
         rollback_layout = QHBoxLayout()
         rollback_layout.addWidget(QLabel("Rollback Backup:"))
         self.rollback_combo = _AutoRefreshComboBox(self._refresh_backups)
+        self.rollback_combo.setMinimumWidth(300)
         rollback_layout.addWidget(self.rollback_combo)
         rollback_layout.addStretch()
         main_layout.addLayout(rollback_layout)
@@ -435,9 +436,9 @@ class MainWindow(QMainWindow):
         self.logger.info(f"Refresh backups: {backup_dir}")
         if not backup_dir:
             self.logger.warning("Refresh aborted: backup dir empty")
+            self.rollback_combo.clear()
             return
         self.rollback_combo.clear()
-        self.rollback_combo.setEnabled(False)
 
         try:
             is_remote, user, host, real_path = parse_path(backup_dir)
@@ -469,7 +470,6 @@ class MainWindow(QMainWindow):
                 self.rollback_combo.addItem(name, full_path)
 
             if backups:
-                self.rollback_combo.setEnabled(True)
                 self.logger.info(f"Found {len(backups)} backups")
             else:
                 self.logger.info("No backups found")
