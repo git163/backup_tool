@@ -252,10 +252,17 @@ class MainWindow(QMainWindow):
             self.logger.info(f"Overlapping items: {overlapping}")
 
         if status == CompatStatus.NONE.value:
-            self.logger.warning("Patch aborted: NONE compatibility")
-            QMessageBox.critical(self, "Incompatible", "Source and target have no overlap. Operation aborted.")
-            self._set_busy(False)
-            return
+            self.logger.warning("No overlap detected, showing confirmation dialog")
+            none_text = "## Warning: No Overlap Detected\n\n"
+            none_text += "Source and target have no common items. "
+            none_text += "This means the target will receive all new content.\n\n"
+            none_text += "Do you want to continue?"
+            dialog = ConfirmDialog("No Overlap", none_text, self)
+            if dialog.exec_() != QDialog.Accepted:
+                self.logger.info("User rejected no-overlap confirmation")
+                self._set_busy(False)
+                return
+            self.logger.info("User confirmed no-overlap continuation")
 
         if status == CompatStatus.PARTIAL.value:
             self.logger.info("Partial match detected, showing confirmation dialog")
