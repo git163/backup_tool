@@ -26,6 +26,17 @@ from lib.compat import CompatStatus
 from lib.logger import AppLogger
 
 
+class _AutoRefreshComboBox(QComboBox):
+    """点击展开时自动调用刷新回调"""
+    def __init__(self, refresh_callback, parent=None):
+        super().__init__(parent)
+        self._refresh_callback = refresh_callback
+
+    def showPopup(self):
+        self._refresh_callback()
+        super().showPopup()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, config_path: str = "conf/config.json"):
         super().__init__()
@@ -80,12 +91,8 @@ class MainWindow(QMainWindow):
         # 回滚备份选择
         rollback_layout = QHBoxLayout()
         rollback_layout.addWidget(QLabel("Rollback Backup:"))
-        self.rollback_combo = QComboBox()
-        self.rollback_combo.setEnabled(False)
+        self.rollback_combo = _AutoRefreshComboBox(self._refresh_backups)
         rollback_layout.addWidget(self.rollback_combo)
-        self.refresh_backup_btn = QPushButton("Refresh")
-        self.refresh_backup_btn.clicked.connect(self._refresh_backups)
-        rollback_layout.addWidget(self.refresh_backup_btn)
         rollback_layout.addStretch()
         main_layout.addLayout(rollback_layout)
 
@@ -362,7 +369,6 @@ class MainWindow(QMainWindow):
         self.backup_btn.setEnabled(not busy)
         self.output_btn.setEnabled(not busy)
         self.target_btn.setEnabled(not busy)
-        self.refresh_backup_btn.setEnabled(not busy)
         self.save_config_btn.setEnabled(not busy)
         self.load_config_btn.setEnabled(not busy)
         if busy:
