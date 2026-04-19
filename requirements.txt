@@ -1,2 +1,3 @@
-# Dependencies are bundled in the vendor/ directory.
-# To refresh: pip install paramiko --target vendor
+paramiko>=3.0
+PySide6>=6.0
+pytest>=7.0

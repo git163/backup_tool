@@ -321,6 +321,13 @@ class MainWindow(QMainWindow):
         self.current_thread.start()
 
     def _on_precheck_done(self, status: str, overlapping: list, op_type: str, source: str, target: str, backup: str):
+        # 立即断开 PreCheckThread 的 finished 信号，避免在确认对话框 exec_() 期间误触发兜底恢复
+        if self.current_thread is not None:
+            try:
+                self.current_thread.finished.disconnect(self._on_thread_finished)
+            except TypeError:
+                pass
+
         self.logger.info(f"Precheck done: status={status}, overlapping_count={len(overlapping)}")
         if overlapping:
             self.logger.info(f"Overlapping items: {overlapping}")
@@ -428,6 +435,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", msg)
 
     def _on_thread_finished(self):
+        # PreCheckThread 的 finished 信号不需要兜底恢复，因为 result/error 槽已经处理了 UI 状态
+        sender = self.sender()
+        if isinstance(sender, PreCheckThread):
+            return
         # 兜底：如果线程结束但 busy 仍为 True，强制恢复
         if not self.patch_btn.isEnabled():
             self.logger.warning("Thread finished but busy state not reset, forcing restore")
