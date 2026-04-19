@@ -163,7 +163,7 @@ class MainWindow(QMainWindow):
                 if not password:
                     self.logger.info("Browse cancelled: no password")
                     return
-            dialog = RemoteDirDialog(self.ssh_pool, user_host, password, self)
+            dialog = RemoteDirDialog(self.ssh_pool, user_host, password, real_path, self)
             if dialog.exec_() == QDialog.Accepted:
                 selected = f"{user_host}:{dialog.selected_path}"
                 edit.setText(selected)

@@ -82,7 +82,7 @@ class _RemoteDirLoader(QThread):
 class RemoteDirDialog(QDialog):
     """SSH 远程目录浏览器。"""
 
-    def __init__(self, ssh_pool: SSHPool, user_host: str, password: str, parent=None):
+    def __init__(self, ssh_pool: SSHPool, user_host: str, password: str, initial_path: str = "/", parent=None):
         super().__init__(parent)
         self.ssh_pool = ssh_pool
         self.user_host = user_host
@@ -92,7 +92,7 @@ class RemoteDirDialog(QDialog):
         self.setWindowTitle(f"Remote Browser - {user_host}")
         self.setMinimumSize(500, 400)
         self._setup_ui()
-        self._load_dir("/")
+        self._load_dir(initial_path if initial_path else "/")
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)

@@ -30,6 +30,7 @@ class ListBackupsThread(QThread):
     def run(self):
         try:
             is_remote, user, host, real_path = parse_path(self.backup_dir)
+            prefix = ""
             if is_remote:
                 user_host = f"{user}@{host}"
                 password = self.config.ssh_passwords.get(user_host)
@@ -38,6 +39,7 @@ class ListBackupsThread(QThread):
                     return
                 conn = self.ssh_pool.get(user_host, password)
                 fs = RemoteFS(conn)
+                prefix = f"{user_host}:"
             else:
                 fs = LocalFS()
 
@@ -46,7 +48,7 @@ class ListBackupsThread(QThread):
             backups = []
             for name in entries:
                 if re.match(r'.*_\d{8}_\d{6}$', name):
-                    full_path = fs.join(real_path, name)
+                    full_path = prefix + fs.join(real_path, name)
                     backups.append((name, full_path))
             backups.sort(key=lambda x: x[0], reverse=True)
             self.result.emit(backups)
