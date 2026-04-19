@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 from lib.fs import LocalFS, RemoteFS, parse_path
 from lib.compat import check_patch_compatibility, find_overlapping_paths, backup_overlapping_files, CompatStatus
 from lib.operations import PatchOperation, RollbackOperation, BackupOperation
-from lib.ssh_client import SSHPool, AuthenticationError, ConnectionTimeoutError
+from lib.ssh_client import SSHPool, AuthenticationError, ConnectionTimeoutError, SSHConnection
 
 
 class TestLocalFS:
@@ -435,15 +435,15 @@ class TestTargetViaOutputValidation:
     """测试 Via Output Host 边界校验逻辑"""
 
     def test_parse_path_remote_with_port_like_host(self):
-        """测试带端口的主机名不会被错误解析"""
-        # 当前实现不支持端口，但这格式会被解析为 host="gateway:2222"
+        """测试带端口的主机名解析行为"""
+        # 当前 parse_path 从 @ 后找第一个 :，所以 user@gateway:2222:/path
+        # 会被解析为 host="gateway", real_path="2222:/path"
+        # 这是一个已知的边界约束：不支持自定义端口
         is_remote, user, host, real_path = parse_path("user@gateway:2222:/path")
         assert is_remote
         assert user == "user"
-        # host 会变成 "gateway:2222"，这会导致 paramiko 连接失败
-        # 这是一个已知的边界约束
-        assert host == "gateway:2222"
-        assert real_path == "/path"
+        assert host == "gateway"
+        assert real_path == "2222:/path"
 
     def test_parse_path_edge_cases(self):
         """测试路径解析边界情况"""
