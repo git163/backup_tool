@@ -15,7 +15,7 @@ from gui.qt_compat import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QLineEdit, QPushButton, QTextEdit, QComboBox,
     QFileDialog, QMessageBox, QApplication, Qt, QCursor,
-    QMenuBar, QMenu, QAction
+    QMenuBar, QMenu, QAction, QDialog
 )
 from gui.dialogs import PasswordDialog, RemoteDirDialog, ConfirmDialog
 from gui.thread import PreCheckThread, WorkerThread
