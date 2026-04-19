@@ -18,9 +18,9 @@ from gui.qt_compat import (
     QMenuBar, QMenu, QAction, QDialog
 )
 from gui.dialogs import PasswordDialog, RemoteDirDialog, ConfirmDialog
-from gui.thread import PreCheckThread, WorkerThread
+from gui.thread import PreCheckThread, WorkerThread, ListBackupsThread
 from lib.config import Config
-from lib.fs import parse_path, LocalFS
+from lib.fs import parse_path
 from lib.ssh_client import SSHPool, AuthenticationError
 from lib.compat import CompatStatus
 from lib.logger import AppLogger
@@ -102,22 +102,18 @@ class MainWindow(QMainWindow):
         self.backup_btn = QPushButton("Backup")
         self.patch_btn = QPushButton("Patch")
         self.rollback_btn = QPushButton("Rollback")
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setEnabled(False)
         self.save_config_btn = QPushButton("Save Config")
         self.load_config_btn = QPushButton("Load Config")
 
         self.backup_btn.clicked.connect(self._on_backup)
         self.patch_btn.clicked.connect(self._on_patch)
         self.rollback_btn.clicked.connect(self._on_rollback)
-        self.cancel_btn.clicked.connect(self._on_cancel)
         self.save_config_btn.clicked.connect(self._save_config)
         self.load_config_btn.clicked.connect(self._load_config)
 
         btn_layout.addWidget(self.backup_btn)
         btn_layout.addWidget(self.patch_btn)
         btn_layout.addWidget(self.rollback_btn)
-        btn_layout.addWidget(self.cancel_btn)
         btn_layout.addStretch()
         btn_layout.addWidget(self.save_config_btn)
         btn_layout.addWidget(self.load_config_btn)
@@ -401,12 +397,6 @@ class MainWindow(QMainWindow):
             self.logger.warning("Thread finished but busy state not reset, forcing restore")
             self._set_busy(False)
 
-    def _on_cancel(self):
-        self.logger.info("Cancel clicked")
-        if self.current_thread and hasattr(self.current_thread, 'cancel'):
-            self.current_thread.cancel()
-            self.logger.info("Cancellation requested")
-
     def _on_progress(self, step: str, detail: str):
         self._on_log(f"[{step}] {detail}")
 
@@ -419,7 +409,6 @@ class MainWindow(QMainWindow):
     def _set_busy(self, busy: bool):
         self.patch_btn.setEnabled(not busy)
         self.rollback_btn.setEnabled(not busy)
-        self.cancel_btn.setEnabled(busy)
         self.backup_btn.setEnabled(not busy)
         self.output_btn.setEnabled(not busy)
         self.target_btn.setEnabled(not busy)
@@ -439,43 +428,32 @@ class MainWindow(QMainWindow):
             self.rollback_combo.clear()
             return
         self.rollback_combo.clear()
+        self.rollback_combo.addItem("Loading...")
 
-        try:
-            is_remote, user, host, real_path = parse_path(backup_dir)
-            if is_remote:
-                user_host = f"{user}@{host}"
-                password = self.config.ssh_passwords.get(user_host)
-                if not password:
-                    password = self._ask_password(user_host)
-                    if not password:
-                        self.logger.warning("Refresh aborted: no password")
-                        return
-                from lib.fs import RemoteFS
-                conn = self.ssh_pool.get(user_host, password)
-                fs = RemoteFS(conn)
-                entries = fs.listdir(real_path)
-            else:
-                fs = LocalFS()
-                entries = fs.listdir(real_path)
+        self._list_thread = ListBackupsThread(backup_dir, self.ssh_pool, self.config)
+        self._list_thread.result.connect(self._on_backups_loaded)
+        self._list_thread.error.connect(self._on_backups_error)
+        self._list_thread.start()
 
-            import re
-            backups = []
-            for name in entries:
-                if re.match(r'.*_\d{8}_\d{6}$', name):
-                    backups.append(name)
-            backups.sort(reverse=True)
+    def _on_backups_loaded(self, backups: list):
+        self.rollback_combo.clear()
+        for name, full_path in backups:
+            self.rollback_combo.addItem(name, full_path)
+        if backups:
+            self.logger.info(f"Found {len(backups)} backups")
+        else:
+            self.logger.info("No backups found")
 
-            for name in backups:
-                full_path = fs.join(real_path, name)
-                self.rollback_combo.addItem(name, full_path)
-
-            if backups:
-                self.logger.info(f"Found {len(backups)} backups")
-            else:
-                self.logger.info("No backups found")
-        except Exception as e:
-            self.logger.error(f"Failed to list backups: {e}")
-            QMessageBox.warning(self, "Error", f"Failed to list backups: {e}")
+    def _on_backups_error(self, msg: str):
+        self.rollback_combo.clear()
+        if msg.startswith("AUTH:"):
+            user_host = msg.split(":", 1)[1].strip()
+            password = self._ask_password(user_host)
+            if password:
+                self._refresh_backups()
+            return
+        self.logger.error(f"Failed to list backups: {msg}")
+        QMessageBox.warning(self, "Error", f"Failed to list backups: {msg}")
 
     def _save_config(self):
         self.config.set("backup", self.backup_edit.text().strip())

@@ -15,6 +15,48 @@ from lib.operations import PatchOperation, RollbackOperation, BackupOperation
 from lib.logger import AppLogger
 
 
+class ListBackupsThread(QThread):
+    """异步获取 backup 目录下的备份列表。"""
+    result = Signal(list)   # [(name, full_path), ...]
+    error = Signal(str)
+
+    def __init__(self, backup_dir: str, ssh_pool: SSHPool, config):
+        super().__init__()
+        self.backup_dir = backup_dir
+        self.ssh_pool = ssh_pool
+        self.config = config
+        self.logger = AppLogger.setup()
+
+    def run(self):
+        try:
+            is_remote, user, host, real_path = parse_path(self.backup_dir)
+            if is_remote:
+                user_host = f"{user}@{host}"
+                password = self.config.ssh_passwords.get(user_host)
+                if not password:
+                    self.error.emit(f"AUTH:{user_host}")
+                    return
+                conn = self.ssh_pool.get(user_host, password)
+                fs = RemoteFS(conn)
+            else:
+                fs = LocalFS()
+
+            entries = fs.listdir(real_path)
+            import re
+            backups = []
+            for name in entries:
+                if re.match(r'.*_\d{8}_\d{6}$', name):
+                    full_path = fs.join(real_path, name)
+                    backups.append((name, full_path))
+            backups.sort(key=lambda x: x[0], reverse=True)
+            self.result.emit(backups)
+        except AuthenticationError as e:
+            self.error.emit(f"AUTH:{e}")
+        except Exception as e:
+            self.logger.exception("List backups failed")
+            self.error.emit(str(e))
+
+
 class PreCheckThread(QThread):
     """预检线程：兼容性检查 + 重叠检测。"""
     result = Signal(str, list)   # status, overlapping_paths
