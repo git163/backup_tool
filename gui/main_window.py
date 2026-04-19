@@ -273,10 +273,38 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Input Error", msg)
             return False
 
-        is_remote, _, _, real_output = parse_path(output)
-        if not is_remote and not os.path.exists(real_output):
-            QMessageBox.warning(self, "Input Error", f"Output directory not found: {output}")
-            return False
+        is_remote, user, host, real_output = parse_path(output)
+        if is_remote:
+            user_host = f"{user}@{host}"
+            password = self.config.ssh_passwords.get(user_host)
+            if not password:
+                password = self._ask_password(user_host)
+                if not password:
+                    return False
+            try:
+                conn = self.ssh_pool.get(user_host, password)
+                try:
+                    conn.sftp.stat(real_output)
+                except Exception:
+                    QMessageBox.warning(self, "Input Error", f"Output directory not found: {output}")
+                    return False
+                entries = conn.sftp.listdir(real_output)
+                if not entries:
+                    QMessageBox.warning(self, "Input Error", f"Output directory is empty: {output}")
+                    return False
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to check output directory: {e}")
+                return False
+        else:
+            if not os.path.exists(real_output):
+                QMessageBox.warning(self, "Input Error", f"Output directory not found: {output}")
+                return False
+            if not os.path.isdir(real_output):
+                QMessageBox.warning(self, "Input Error", f"Output path is not a directory: {output}")
+                return False
+            if not os.listdir(real_output):
+                QMessageBox.warning(self, "Input Error", f"Output directory is empty: {output}")
+                return False
         return True
 
     def _validate_via_output(self) -> bool:
