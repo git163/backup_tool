@@ -98,6 +98,7 @@ class MainWindow(QMainWindow):
 
         # 操作按钮 + 配置按钮
         btn_layout = QHBoxLayout()
+        self.backup_btn = QPushButton("Backup")
         self.patch_btn = QPushButton("Patch")
         self.rollback_btn = QPushButton("Rollback")
         self.cancel_btn = QPushButton("Cancel")
@@ -105,12 +106,14 @@ class MainWindow(QMainWindow):
         self.save_config_btn = QPushButton("Save Config")
         self.load_config_btn = QPushButton("Load Config")
 
+        self.backup_btn.clicked.connect(self._on_backup)
         self.patch_btn.clicked.connect(self._on_patch)
         self.rollback_btn.clicked.connect(self._on_rollback)
         self.cancel_btn.clicked.connect(self._on_cancel)
         self.save_config_btn.clicked.connect(self._save_config)
         self.load_config_btn.clicked.connect(self._load_config)
 
+        btn_layout.addWidget(self.backup_btn)
         btn_layout.addWidget(self.patch_btn)
         btn_layout.addWidget(self.rollback_btn)
         btn_layout.addWidget(self.cancel_btn)
@@ -198,28 +201,76 @@ class MainWindow(QMainWindow):
             self.logger.info(f"Password dialog cancelled for {user_host}")
         return ""
 
-    def _on_patch(self):
+    def _on_backup(self):
         output = self.output_edit.text().strip()
         target = self.target_edit.text().strip()
         backup = self.backup_edit.text().strip()
 
-        self.logger.info(f"Patch clicked: output={output}, target={target}, backup={backup}")
+        self.logger.info(f"Backup clicked: output={output}, target={target}, backup={backup}")
 
-        if not output or not target:
-            self.logger.warning("Patch aborted: Output or Target empty")
-            QMessageBox.warning(self, "Input Error", "Output and Target directories are required")
+        if not output or not target or not backup:
+            self.logger.warning("Backup aborted: Output, Target or Backup empty")
+            QMessageBox.warning(self, "Input Error", "Output, Target and Backup directories are required")
             return
 
         is_remote, _, _, real_output = parse_path(output)
         if not is_remote and not os.path.exists(real_output):
-            self.logger.warning(f"Patch aborted: Output not found: {output}")
+            self.logger.warning(f"Backup aborted: Output not found: {output}")
             QMessageBox.warning(self, "Input Error", f"Output directory not found: {output}")
             return
 
         self._set_busy(True)
-        self._run_precheck(output, target, lambda status, overlapping: self._on_precheck_done(
-            status, overlapping, 'patch', output, target, backup
+        self._run_precheck(output, target, lambda status, overlapping: self._on_backup_precheck_done(
+            status, overlapping, output, target, backup
         ))
+
+    def _on_backup(self):
+        if not self._validate_patch_input(require_backup=True):
+            return
+        self._set_busy(True)
+        self._run_precheck(
+            self.output_edit.text().strip(),
+            self.target_edit.text().strip(),
+            lambda status, overlapping: self._on_backup_precheck_done(
+                status, overlapping,
+                self.output_edit.text().strip(),
+                self.target_edit.text().strip(),
+                self.backup_edit.text().strip()
+            )
+        )
+
+    def _on_backup_precheck_done(self, status: str, overlapping: list, output: str, target: str, backup: str):
+        self.logger.info(f"Backup precheck done: status={status}, overlapping_count={len(overlapping)}")
+        if overlapping:
+            self.logger.info(f"Overlapping items: {overlapping}")
+
+        if status == CompatStatus.NONE.value:
+            self.logger.info("No overlap detected, nothing to backup")
+            QMessageBox.information(self, "Info", "No overlapping files to backup.")
+            self._set_busy(False)
+            return
+
+        if not self._confirm_partial(overlapping):
+            return
+        if not self._confirm_overlapping(overlapping, "Confirm Backup", "backed up"):
+            return
+
+        self._run_worker('backup_overlap', output, target, backup)
+
+    def _on_patch(self):
+        if not self._validate_patch_input():
+            return
+        self._set_busy(True)
+        self._run_precheck(
+            self.output_edit.text().strip(),
+            self.target_edit.text().strip(),
+            lambda status, overlapping: self._on_precheck_done(
+                status, overlapping, 'patch',
+                self.output_edit.text().strip(),
+                self.target_edit.text().strip(),
+                self.backup_edit.text().strip()
+            )
+        )
 
     def _on_rollback(self):
         backup = self.backup_edit.text().strip()

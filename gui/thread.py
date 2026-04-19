@@ -94,6 +94,8 @@ class WorkerThread(QThread):
                 self._do_rollback()
             elif self.operation_type == 'backup':
                 self._do_backup()
+            elif self.operation_type == 'backup_overlap':
+                self._do_backup_overlap()
             else:
                 self.error.emit(f"Unknown operation: {self.operation_type}")
         except AuthenticationError as e:
@@ -102,7 +104,8 @@ class WorkerThread(QThread):
             self.logger.exception("Worker failed")
             self.error.emit(str(e))
 
-    def _do_patch(self):
+    def _backup_overlapping(self, require_backup: bool = False) -> str | None:
+        """备份重叠文件，返回备份名；require_backup=True 时无备份目录视为错误。"""
         from lib.compat import backup_overlapping_files
 
         output_path = self.paths['output']
@@ -113,29 +116,41 @@ class WorkerThread(QThread):
         target_fs, target_real = self._get_fs(target_path)
         backup_fs, backup_real = self._get_fs(backup_dir) if backup_dir else (LocalFS(), backup_dir)
 
-        self.logger.info(f"Patch: output={output_real}, target={target_real}, backup={backup_real}")
+        if require_backup and not backup_dir:
+            self.logger.warning("Backup overlap: no backup dir specified")
+            self.finished_sig.emit(False, "Backup directory is required")
+            return None
 
-        # 备份重叠文件
-        if backup_dir:
-            self.logger.info("Patch: backing up overlapping files...")
-            self.log.emit("Backing up overlapping files...")
-            backup_name = backup_overlapping_files(
-                output_fs, target_fs, output_real, target_real,
-                backup_fs, backup_real, self.logger,
-                self._is_cancelled,
-            )
-            if backup_name:
-                self.logger.info(f"Patch: backup saved as {backup_name}")
-                self.log.emit(f"Backup saved: {backup_name}")
-            else:
-                self.logger.info("Patch: no overlapping files to backup")
+        if not backup_dir:
+            return None
+
+        self.logger.info("Backing up overlapping files...")
+        self.log.emit("Backing up overlapping files...")
+        backup_name = backup_overlapping_files(
+            output_fs, target_fs, output_real, target_real,
+            backup_fs, backup_real, self.logger,
+            self._is_cancelled,
+        )
+        if backup_name:
+            self.logger.info(f"Backup saved as {backup_name}")
+            self.log.emit(f"Backup saved: {backup_name}")
+        else:
+            self.logger.info("No overlapping files to backup")
+        return backup_name
+
+    def _do_patch(self):
+        self.logger.info(f"Patch: output={self.paths['output']}, target={self.paths['target']}")
+
+        self._backup_overlapping()
 
         if self._is_cancelled():
             self.logger.info("Patch: cancelled by user")
             self.finished_sig.emit(False, "Cancelled by user")
             return
 
-        # 执行补丁
+        output_fs, output_real = self._get_fs(self.paths['output'])
+        target_fs, target_real = self._get_fs(self.paths['target'])
+
         self.logger.info("Patch: applying patch...")
         self.log.emit("Applying patch...")
         op = PatchOperation(
@@ -145,6 +160,23 @@ class WorkerThread(QThread):
         result = op.run()
         self.logger.info(f"Patch: result success={result.success}, message={result.message}")
         self.finished_sig.emit(result.success, result.message)
+
+    def _do_backup_overlap(self):
+        self.logger.info(f"BackupOverlap: output={self.paths['output']}, target={self.paths['target']}")
+
+        backup_name = self._backup_overlapping(require_backup=True)
+        if backup_name is None:
+            return
+
+        if self._is_cancelled():
+            self.logger.info("BackupOverlap: cancelled by user")
+            self.finished_sig.emit(False, "Cancelled by user")
+            return
+
+        if backup_name:
+            self.finished_sig.emit(True, f"Backup completed: {backup_name}")
+        else:
+            self.finished_sig.emit(True, "No overlapping files to backup")
 
     def _do_rollback(self):
         backup_path = self.paths['backup']
