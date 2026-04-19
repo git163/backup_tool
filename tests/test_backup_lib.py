@@ -579,6 +579,51 @@ class TestWorkerThreadTargetViaOutput:
         assert isinstance(target_fs, RemoteFS)
         assert target_real == "/data/target"
 
+    @patch("lib.ssh_client.paramiko.SSHClient")
+    def test_rollback_get_target_fs_with_via_output_success(self, mock_ssh_class):
+        """测试 rollback 勾选 Via Output Host 时正确建立跳板连接（回归：paths 需包含 output）"""
+        from gui.thread import WorkerThread
+
+        mock_client = MagicMock()
+        mock_transport = MagicMock()
+        mock_transport.is_active.return_value = True
+        mock_client.get_transport.return_value = mock_transport
+        mock_ssh_class.return_value = mock_client
+
+        mock_channel = MagicMock()
+        mock_transport.open_channel.return_value = mock_channel
+
+        mock_sftp = MagicMock()
+        mock_client.open_sftp.return_value = mock_sftp
+        mock_sftp_channel = MagicMock()
+        mock_sftp.get_channel.return_value = mock_sftp_channel
+
+        mock_config = MagicMock()
+        mock_config.ssh_passwords = {
+            "user@gateway": "gateway_pass",
+            "user@internal": "internal_pass"
+        }
+
+        ssh_pool = SSHPool()
+
+        # rollback 时 paths 必须包含 output，否则 _get_target_fs 会抛 KeyError
+        thread = WorkerThread(
+            "rollback",
+            {
+                "backup": "user@gateway:/data/backup",
+                "target": "user@internal:/data/target",
+                "backup_dir": "user@gateway:/data/backup",
+                "output": "user@gateway:/data/output",
+            },
+            ssh_pool,
+            mock_config,
+            target_via_output=True
+        )
+
+        target_fs, target_real = thread._get_target_fs()
+        assert isinstance(target_fs, RemoteFS)
+        assert target_real == "/data/target"
+
     def test_get_target_fs_output_local_raises(self):
         """测试 output 为本地路径时抛出 ValueError"""
         from gui.thread import WorkerThread
