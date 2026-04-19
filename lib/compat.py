@@ -9,7 +9,7 @@ import os
 from enum import Enum
 from typing import Optional
 
-from lib.fs import FileSystem
+from lib.fs import FileSystem, RemoteFS, TempLocalFS
 
 
 class CompatStatus(Enum):
@@ -119,13 +119,19 @@ def _copy_between_fs(
 ) -> None:
     """在两个 FileSystem 之间复制文件或目录。"""
     if src_fs.isfile(src_path):
-        if hasattr(dst_fs, 'upload_file') and hasattr(src_fs, 'download_file'):
-            # RemoteFS -> RemoteFS 需要中转，这里不处理
-            pass
-        if hasattr(src_fs, 'download_file'):
+        if isinstance(src_fs, RemoteFS) and isinstance(dst_fs, RemoteFS):
+            # Remote -> Remote 中转
+            temp_fs = TempLocalFS()
+            try:
+                temp_path = os.path.join(temp_fs.temp_dir, os.path.basename(src_path))
+                src_fs.download_file(src_path, temp_path)
+                dst_fs.upload_file(temp_path, dst_path)
+            finally:
+                temp_fs.cleanup()
+        elif isinstance(src_fs, RemoteFS):
             # Remote -> Local
             src_fs.download_file(src_path, dst_path)
-        elif hasattr(dst_fs, 'upload_file'):
+        elif isinstance(dst_fs, RemoteFS):
             # Local -> Remote
             dst_fs.upload_file(src_path, dst_path)
         else:
