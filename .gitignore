@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+config_test.json
+scipy-alg-backup/
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.claude/
+# macOS
+.DS_Store
+
+# Logs (keep directory structure but ignore log files)
+*.log
+
+# PySide build artifacts
+*.qrc.py
+*.ui.py
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local config overrides (optional)
+# conf/config.local.json

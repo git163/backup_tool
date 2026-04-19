@@ -1,0 +1,5 @@
+{
+  "backup": "~/backup_tool/backup",
+  "output": "~/backup_tool/output",
+  "target": "~/backup_tool/target"
+}
