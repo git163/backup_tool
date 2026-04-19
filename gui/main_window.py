@@ -266,7 +266,7 @@ class MainWindow(QMainWindow):
         if overlapping:
             self.logger.info(f"Overlapping items: {overlapping}")
 
-        if status == CompatStatus.NONE.value:
+        if not overlapping:
             self.logger.info("No overlap detected, nothing to backup")
             QMessageBox.information(self, "Info", "No overlapping files to backup.")
             self._set_busy(False)

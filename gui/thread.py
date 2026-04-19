@@ -168,6 +168,7 @@ class WorkerThread(QThread):
 
         backup_name = self._backup_overlapping(require_backup=True)
         if backup_name is None:
+            self.finished_sig.emit(True, "No overlapping files to backup")
             return
 
         if self._is_cancelled():
