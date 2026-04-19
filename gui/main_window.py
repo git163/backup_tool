@@ -488,6 +488,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Load Config", "conf", "JSON (*.json)")
         if path:
             self.config.load(path)
+            self.config_path = path
             self._load_defaults()
             self.logger.info(f"Config loaded from {path}")
 
