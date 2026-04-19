@@ -4,6 +4,8 @@
 - WorkerThread: 执行实际的补丁/回滚/备份操作
 """
 
+from typing import Optional
+
 from gui.qt_compat import QThread, Signal
 
 from lib.compat import check_patch_compatibility, find_overlapping_paths, CompatStatus
@@ -104,7 +106,7 @@ class WorkerThread(QThread):
             self.logger.exception("Worker failed")
             self.error.emit(str(e))
 
-    def _backup_overlapping(self, require_backup: bool = False) -> str | None:
+    def _backup_overlapping(self, require_backup: bool = False) -> Optional[str]:
         """备份重叠文件，返回备份名；require_backup=True 时无备份目录视为错误。"""
         from lib.compat import backup_overlapping_files
 

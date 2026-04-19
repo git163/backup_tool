@@ -201,28 +201,50 @@ class MainWindow(QMainWindow):
             self.logger.info(f"Password dialog cancelled for {user_host}")
         return ""
 
-    def _on_backup(self):
+    def _validate_patch_input(self, require_backup: bool = False) -> bool:
         output = self.output_edit.text().strip()
         target = self.target_edit.text().strip()
         backup = self.backup_edit.text().strip()
 
-        self.logger.info(f"Backup clicked: output={output}, target={target}, backup={backup}")
-
-        if not output or not target or not backup:
-            self.logger.warning("Backup aborted: Output, Target or Backup empty")
-            QMessageBox.warning(self, "Input Error", "Output, Target and Backup directories are required")
-            return
+        if not output or not target or (require_backup and not backup):
+            msg = "Output, Target and Backup directories are required" if require_backup else "Output and Target directories are required"
+            QMessageBox.warning(self, "Input Error", msg)
+            return False
 
         is_remote, _, _, real_output = parse_path(output)
         if not is_remote and not os.path.exists(real_output):
-            self.logger.warning(f"Backup aborted: Output not found: {output}")
             QMessageBox.warning(self, "Input Error", f"Output directory not found: {output}")
-            return
+            return False
+        return True
 
-        self._set_busy(True)
-        self._run_precheck(output, target, lambda status, overlapping: self._on_backup_precheck_done(
-            status, overlapping, output, target, backup
-        ))
+    def _confirm_partial(self, overlapping: list) -> bool:
+        if not overlapping:
+            return True
+        diff_text = self._build_diff_text(overlapping)
+        dialog = ConfirmDialog("Partial Match", diff_text, self)
+        if dialog.exec_() != QDialog.Accepted:
+            self.logger.info("User rejected partial match confirmation")
+            self._set_busy(False)
+            return False
+        self.logger.info("User confirmed partial match")
+        return True
+
+    def _confirm_overlapping(self, overlapping: list, title: str, action_text: str) -> bool:
+        if not overlapping:
+            return True
+        overlap_text = f"The following items will be {action_text}:\n\n"
+        for name in overlapping[:20]:
+            overlap_text += f"- {name}\n"
+        if len(overlapping) > 20:
+            overlap_text += f"... and {len(overlapping) - 20} more\n"
+        overlap_text += "\nContinue?"
+        dialog = ConfirmDialog(title, overlap_text, self)
+        if dialog.exec_() != QDialog.Accepted:
+            self.logger.info(f"User rejected {action_text} confirmation")
+            self._set_busy(False)
+            return False
+        self.logger.info(f"User confirmed {action_text}")
+        return True
 
     def _on_backup(self):
         if not self._validate_patch_input(require_backup=True):
@@ -322,30 +344,10 @@ class MainWindow(QMainWindow):
                 return
             self.logger.info("User confirmed no-overlap continuation")
 
-        if status == CompatStatus.PARTIAL.value:
-            self.logger.info("Partial match detected, showing confirmation dialog")
-            diff_text = self._build_diff_text(overlapping)
-            dialog = ConfirmDialog("Partial Match", diff_text, self)
-            if dialog.exec_() != QDialog.Accepted:
-                self.logger.info("User rejected partial match confirmation")
-                self._set_busy(False)
-                return
-            self.logger.info("User confirmed partial match")
-
-        if overlapping:
-            self.logger.info("Showing overwrite confirmation dialog")
-            overlap_text = "The following items will be overwritten:\n\n"
-            for name in overlapping[:20]:
-                overlap_text += f"- {name}\n"
-            if len(overlapping) > 20:
-                overlap_text += f"... and {len(overlapping) - 20} more\n"
-            overlap_text += "\nContinue?"
-            dialog = ConfirmDialog("Confirm Overwrite", overlap_text, self)
-            if dialog.exec_() != QDialog.Accepted:
-                self.logger.info("User rejected overwrite confirmation")
-                self._set_busy(False)
-                return
-            self.logger.info("User confirmed overwrite")
+        if not self._confirm_partial(overlapping):
+            return
+        if not self._confirm_overlapping(overlapping, "Confirm Overwrite", "overwritten"):
+            return
 
         self._run_worker(op_type, source, target, backup)
 
