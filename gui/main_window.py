@@ -93,6 +93,8 @@ class MainWindow(QMainWindow):
         rollback_layout.addWidget(QLabel("Rollback Backup:"))
         self.rollback_combo = _AutoRefreshComboBox(self._refresh_backups)
         self.rollback_combo.setMinimumWidth(300)
+        self.rollback_combo.setMaxVisibleItems(10)
+        self.rollback_combo.view().setMinimumHeight(120)
         rollback_layout.addWidget(self.rollback_combo)
         rollback_layout.addStretch()
         main_layout.addLayout(rollback_layout)
