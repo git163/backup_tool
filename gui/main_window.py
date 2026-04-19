@@ -330,7 +330,7 @@ class MainWindow(QMainWindow):
         if overlapping:
             self.logger.info(f"Overlapping items: {overlapping}")
 
-        if status == CompatStatus.NONE.value:
+        if status in (CompatStatus.NONE.value, CompatStatus.EMPTY_TARGET.value):
             self.logger.warning("No overlap detected, showing confirmation dialog")
             none_text = "## Warning: No Overlap Detected\n\n"
             none_text += "Source and target have no common items. "
