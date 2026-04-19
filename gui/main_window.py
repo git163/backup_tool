@@ -216,10 +216,10 @@ class MainWindow(QMainWindow):
             return False
         return True
 
-    def _confirm_partial(self, overlapping: list) -> bool:
+    def _confirm_partial(self, source: str, target: str, overlapping: list) -> bool:
         if not overlapping:
             return True
-        diff_text = self._build_diff_text(overlapping)
+        diff_text = self._build_partial_text(source, target, overlapping)
         dialog = ConfirmDialog("Partial Match", diff_text, self)
         if dialog.exec_() != QDialog.Accepted:
             self.logger.info("User rejected partial match confirmation")
@@ -228,15 +228,10 @@ class MainWindow(QMainWindow):
         self.logger.info("User confirmed partial match")
         return True
 
-    def _confirm_overlapping(self, overlapping: list, title: str, action_text: str) -> bool:
+    def _confirm_overlapping(self, source: str, target: str, overlapping: list, title: str, action_desc: str, action_text: str) -> bool:
         if not overlapping:
             return True
-        overlap_text = f"The following items will be {action_text}:\n\n"
-        for name in overlapping[:20]:
-            overlap_text += f"- {name}\n"
-        if len(overlapping) > 20:
-            overlap_text += f"... and {len(overlapping) - 20} more\n"
-        overlap_text += "\nContinue?"
+        overlap_text = self._build_overwrite_text(source, target, overlapping, action_desc, action_text)
         dialog = ConfirmDialog(title, overlap_text, self)
         if dialog.exec_() != QDialog.Accepted:
             self.logger.info(f"User rejected {action_text} confirmation")
@@ -271,9 +266,9 @@ class MainWindow(QMainWindow):
             self._set_busy(False)
             return
 
-        if not self._confirm_partial(overlapping):
+        if not self._confirm_partial(target, backup, overlapping):
             return
-        if not self._confirm_overlapping(overlapping, "Confirm Backup", "backed up"):
+        if not self._confirm_overlapping(target, backup, overlapping, "Confirm Backup", "Backup", "backed up"):
             return
 
         self._run_worker('backup_overlap', output, target, backup)
@@ -332,10 +327,7 @@ class MainWindow(QMainWindow):
 
         if status in (CompatStatus.NONE.value, CompatStatus.EMPTY_TARGET.value):
             self.logger.warning("No overlap detected, showing confirmation dialog")
-            none_text = "## Warning: No Overlap Detected\n\n"
-            none_text += "Source and target have no common items. "
-            none_text += "This means the target will receive all new content.\n\n"
-            none_text += "Do you want to continue?"
+            none_text = self._build_no_overlap_text(source, target)
             dialog = ConfirmDialog("No Overlap", none_text, self)
             if dialog.exec_() != QDialog.Accepted:
                 self.logger.info("User rejected no-overlap confirmation")
@@ -343,21 +335,63 @@ class MainWindow(QMainWindow):
                 return
             self.logger.info("User confirmed no-overlap continuation")
 
-        if not self._confirm_partial(overlapping):
+        if not self._confirm_partial(source, target, overlapping):
             return
-        if not self._confirm_overlapping(overlapping, "Confirm Overwrite", "overwritten"):
-            return
+        if op_type == 'rollback':
+            if not self._confirm_overlapping(source, target, overlapping, "Confirm Rollback", "Rollback", "overwritten"):
+                return
+        else:
+            if not self._confirm_overlapping(source, target, overlapping, "Confirm Overwrite", "Overwrite", "overwritten"):
+                return
 
         self._run_worker(op_type, source, target, backup)
 
-    def _build_diff_text(self, overlapping: list) -> str:
+    def _truncate_path(self, path: str, max_len: int = 60) -> str:
+        if len(path) <= max_len:
+            return path
+        prefix_len = max_len // 2 - 2
+        suffix_len = max_len // 2 - 1
+        return path[:prefix_len] + "..." + path[-suffix_len:]
+
+    def _build_partial_text(self, source: str, target: str, overlapping: list) -> str:
         text = "## Partial Match Detected\n\n"
+        text += f"**From:** `{self._truncate_path(source)}`\n"
+        text += f"**To:** `{self._truncate_path(target)}`\n\n"
         text += "The following items exist in both directories:\n\n"
-        for name in overlapping[:10]:
-            text += f"- {name}\n"
-        if len(overlapping) > 10:
-            text += f"- ... and {len(overlapping) - 10} more\n"
+        text += "| Type | Item |\n|------|------|\n"
+        for item in overlapping[:20]:
+            type_label = "Dir" if item.get("is_dir") else "File"
+            text += f"| {type_label} | {item['name']} |\n"
+        if len(overlapping) > 20:
+            text += f"| ... | and {len(overlapping) - 20} more |\n"
+        if any(item.get("is_dir") for item in overlapping):
+            text += "\n**Warning:** Directories will be completely removed and replaced.\n"
         text += "\nDo you want to continue?"
+        return text
+
+    def _build_overwrite_text(self, source: str, target: str, overlapping: list, action_desc: str, action_text: str) -> str:
+        text = f"## Confirm {action_desc}\n\n"
+        text += f"**From:** `{self._truncate_path(source)}`\n"
+        text += f"**To:** `{self._truncate_path(target)}`\n\n"
+        text += f"The following items will be {action_text}:\n\n"
+        text += "| Type | Item |\n|------|------|\n"
+        for item in overlapping[:20]:
+            type_label = "Dir" if item.get("is_dir") else "File"
+            text += f"| {type_label} | {item['name']} |\n"
+        if len(overlapping) > 20:
+            text += f"| ... | and {len(overlapping) - 20} more |\n"
+        if any(item.get("is_dir") for item in overlapping):
+            text += "\n**Warning:** Directories will be completely removed and replaced.\n"
+        text += "\nContinue?"
+        return text
+
+    def _build_no_overlap_text(self, source: str, target: str) -> str:
+        text = "## Warning: No Overlap Detected\n\n"
+        text += f"**From:** `{self._truncate_path(source)}`\n"
+        text += f"**To:** `{self._truncate_path(target)}`\n\n"
+        text += "Source and target have no common items. "
+        text += "This means the target will receive all new content.\n\n"
+        text += "Do you want to continue?"
         return text
 
     def _run_worker(self, op_type: str, source: str, target: str, backup: str):

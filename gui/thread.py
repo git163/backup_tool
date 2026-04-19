@@ -85,8 +85,12 @@ class PreCheckThread(QThread):
             self.log.emit(f"Compatibility status: {status.value}")
 
             overlapping = find_overlapping_paths(output_fs, target_fs, output_real, target_real)
-            self.logger.info(f"PreCheck: overlapping count = {len(overlapping)}")
-            self.result.emit(status.value, overlapping)
+            enriched = []
+            for name in overlapping:
+                src_item = output_fs.join(output_real, name)
+                enriched.append({"name": name, "is_dir": output_fs.isdir(src_item)})
+            self.logger.info(f"PreCheck: overlapping count = {len(enriched)}")
+            self.result.emit(status.value, enriched)
         except AuthenticationError as e:
             self.logger.error(f"PreCheck auth error: {e}")
             self.error.emit(f"AUTH:{e}")

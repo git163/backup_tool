@@ -219,32 +219,55 @@ class ConfirmDialog(QDialog):
     def _markdown_to_html(self, text: str) -> str:
         """简单 Markdown 转 HTML。"""
         lines = text.split("\n")
-        html_lines = ["<html><body style='font-family:sans-serif;'>"]
+        html_lines = [
+            "<html><head><style>",
+            "body { font-family: sans-serif; font-size: 14px; }",
+            "table { border-collapse: collapse; width: 100%; margin: 10px 0; }",
+            "th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }",
+            "th { background-color: #f0f0f0; font-weight: bold; }",
+            "tr:nth-child(even) { background-color: #fafafa; }",
+            "code { background-color: #f4f4f4; padding: 2px 4px; border-radius: 3px; font-family: monospace; }",
+            ".warning { color: #c00; font-weight: bold; }",
+            "</style></head><body>"
+        ]
         in_table = False
+        table_header_done = False
         for line in lines:
             stripped = line.strip()
             if stripped.startswith("# "):
-                html_lines.append(f"<h1>{stripped[2:]}</h1>")
+                html_lines.append(f"<h1>{self._inline_md(stripped[2:])}</h1>")
             elif stripped.startswith("## "):
-                html_lines.append(f"<h2>{stripped[3:]}</h2>")
+                html_lines.append(f"<h2>{self._inline_md(stripped[3:])}</h2>")
             elif stripped.startswith("- "):
-                html_lines.append(f"<li>{stripped[2:]}</li>")
+                html_lines.append(f"<li>{self._inline_md(stripped[2:])}</li>")
             elif "|" in stripped:
                 if not in_table:
-                    html_lines.append("<table border='1' cellpadding='4' cellspacing='0'>")
+                    html_lines.append("<table>")
                     in_table = True
-                # 跳过分隔行
+                    table_header_done = False
                 if "---" in stripped or "====" in stripped:
                     continue
                 cells = [c.strip() for c in stripped.split("|") if c.strip()]
-                row = "".join(f"<td>{c}</td>" for c in cells)
+                if not table_header_done:
+                    row = "".join(f"<th>{self._inline_md(c)}</th>" for c in cells)
+                    table_header_done = True
+                else:
+                    row = "".join(f"<td>{self._inline_md(c)}</td>" for c in cells)
                 html_lines.append(f"<tr>{row}</tr>")
             else:
                 if in_table:
                     html_lines.append("</table>")
                     in_table = False
-                html_lines.append(f"<p>{stripped}</p>")
+                    table_header_done = False
+                if stripped:
+                    html_lines.append(f"<p>{self._inline_md(stripped)}</p>")
         if in_table:
             html_lines.append("</table>")
         html_lines.append("</body></html>")
         return "\n".join(html_lines)
+
+    def _inline_md(self, text: str) -> str:
+        import re
+        text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+        text = re.sub(r'`(.*?)`', r'<code>\1</code>', text)
+        return text
