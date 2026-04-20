@@ -136,6 +136,8 @@ class RemoteFS(FileSystem):
         return f'/home/{self.ssh_conn.user}'
 
     def _resolve(self, path: str) -> str:
+        # 统一路径分隔符为 Linux 风格
+        path = path.replace('\\', '/')
         if path.startswith('~/') or path == '~':
             return self._home_dir + path[1:]
         return path
