@@ -59,22 +59,42 @@ def find_overlapping_paths(
     target_path: str,
 ) -> list[str]:
     """
-    返回将被覆盖的文件/目录列表，仅保留最底层项。
+    返回将被覆盖的文件所在的最底层目录列表，去重。
     路径相对于 source_path/target_path。
     """
     if not target_fs.exists(target_path):
         return []
 
-    overlapping = []
-    source_items = source_fs.listdir(source_path)
+    dirs_with_files = set()
 
-    for name in source_items:
-        src_item = source_fs.join(source_path, name)
-        dst_item = target_fs.join(target_path, name)
-        if target_fs.exists(dst_item):
-            overlapping.append(name)
+    def collect_dirs(fs: FileSystem, base_path: str, rel_prefix: str = ""):
+        if not fs.exists(base_path):
+            return
+        for item in fs.listdir(base_path):
+            item_path = fs.join(base_path, item)
+            rel_path = f"{rel_prefix}/{item}" if rel_prefix else item
 
-    return overlapping
+            if fs.isdir(item_path):
+                collect_dirs(fs, item_path, rel_path)
+            else:
+                # 文件，找到其所在目录
+                parent = fs.dirname(rel_path)
+                if parent:
+                    dirs_with_files.add(parent)
+                else:
+                    # 根目录下的文件
+                    dirs_with_files.add("")
+
+    collect_dirs(source_fs, source_path)
+
+    # 过滤出在 target 中存在的目录
+    result = []
+    for dir_path in dirs_with_files:
+        target_dir = target_fs.join(target_path, dir_path) if dir_path else target_path
+        if target_fs.exists(target_dir):
+            result.append(dir_path if dir_path else ".")
+
+    return result
 
 
 def backup_overlapping_files(
