@@ -62,6 +62,9 @@ def find_overlapping_paths(
     返回将被覆盖的文件所在的最底层目录列表，去重。
     路径相对于 source_path/target_path。
     """
+    # 忽略的文件
+    IGNORE_NAMES = {".DS_Store", "thumbs.db"}
+
     if not target_fs.exists(target_path):
         return []
 
@@ -71,6 +74,10 @@ def find_overlapping_paths(
         if not fs.exists(base_path):
             return
         for item in fs.listdir(base_path):
+            # 跳过忽略的文件和目录
+            if item in IGNORE_NAMES or item.endswith(".pyc"):
+                continue
+
             item_path = fs.join(base_path, item)
             rel_path = f"{rel_prefix}/{item}" if rel_prefix else item
 
