@@ -51,7 +51,7 @@ class MainWindow(QMainWindow):
         self.current_thread = None
 
         self.setWindowTitle("Auto Backup and Patch Tool")
-        self.setMinimumSize(700, 500)
+        self.setMinimumSize(900, 600)
         self._setup_ui()
         self._load_defaults()
 
