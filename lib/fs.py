@@ -64,6 +64,8 @@ class LocalFS(FileSystem):
 
     @staticmethod
     def _resolve(path: str) -> str:
+        # 统一路径分隔符
+        path = path.replace('\\', '/')
         return os.path.expanduser(path)
 
     def listdir(self, path: str) -> list[str]:
