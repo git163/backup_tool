@@ -305,16 +305,27 @@ def parse_path(path: str) -> tuple[bool, Optional[str], Optional[str], str]:
     解析路径，返回 (is_remote, user, host, real_path)。
     远程路径格式: user@host:/path
     """
+    # 统一路径分隔符
+    path = path.replace('\\', '/')
+
     if path.startswith('~'):
         path = os.path.expanduser(path)
 
     if '@' in path and ':' in path:
-        # 远程路径
+        # 远程路径 (user@host:/path)
         at_idx = path.index('@')
         colon_idx = path.index(':', at_idx)
         user = path[:at_idx]
         host = path[at_idx + 1:colon_idx]
         real_path = path[colon_idx + 1:]
+        # 检查是否为 Windows 盘符路径误判 (如 user@C:/path)
+        if host and len(host) == 1 and host.isalpha():
+            return False, None, None, os.path.abspath(path)
         return True, user, host, real_path
+
+    # 处理 Windows 盘符路径 (如 C:/path 或 c:/path)
+    if len(path) >= 2 and path[1] == ':':
+        # 将 / 替换为本地系统路径分隔符，由 os.path.abspath 处理
+        return False, None, None, os.path.abspath(path)
 
     return False, None, None, os.path.abspath(path)
